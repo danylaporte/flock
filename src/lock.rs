@@ -1,8 +1,8 @@
-use crate::{ConnOrFactory, LoadFromConn, LockValue, ReadFut, ReadOptFut, WriteFut, WriteOptFut};
+use crate::{ConnOrFactory, LoadFromConn, ReadFut, ReadOptFut, SetTag, WriteFut, WriteOptFut};
 use futures_locks::RwLock;
 
 pub struct Lock<T> {
-    lock: RwLock<LockValue<T>>,
+    lock: RwLock<Option<T>>,
 }
 
 impl<T> Lock<T> {
@@ -21,12 +21,15 @@ impl<T> Lock<T> {
     pub fn write<C>(&self, conn: C) -> WriteFut<T>
     where
         C: Into<ConnOrFactory>,
-        T: LoadFromConn,
+        T: LoadFromConn + SetTag,
     {
         WriteFut::load(conn.into(), self.lock.write())
     }
 
-    pub fn write_opt(&self) -> WriteOptFut<T> {
+    pub fn write_opt(&self) -> WriteOptFut<T>
+    where
+        T: SetTag,
+    {
         WriteOptFut::load(self.lock.write())
     }
 }

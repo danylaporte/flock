@@ -1,4 +1,4 @@
-use crate::{map_error, ConnOrFactory, LoadFromConn, LockValue};
+use crate::{map_error, ConnOrFactory, LoadFromConn, SetTag};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLockWriteFut, RwLockWriteGuard};
@@ -6,14 +6,16 @@ use mssql_client::Connection;
 use std::ops::{Deref, DerefMut};
 use version_tag::VersionTag;
 
-pub struct WriteGuard<T> {
-    guard: RwLockWriteGuard<LockValue<T>>,
+pub struct WriteGuard<T: SetTag> {
+    cancel_tag: bool,
+    guard: RwLockWriteGuard<Option<T>>,
     new_tag: VersionTag,
 }
 
-impl<T> WriteGuard<T> {
-    fn new(guard: RwLockWriteGuard<LockValue<T>>) -> Self {
+impl<T: SetTag> WriteGuard<T> {
+    fn new(guard: RwLockWriteGuard<Option<T>>) -> Self {
         Self {
+            cancel_tag: false,
             guard,
             new_tag: VersionTag::new(),
         }
@@ -23,52 +25,51 @@ impl<T> WriteGuard<T> {
     ///
     /// Use this method when there is no changes occurred.
     pub fn cancel_tag(&mut self) {
-        self.new_tag = self.guard.deref().1;
+        self.cancel_tag = true;
     }
 
     /// The new tag that will be put on the lock value on drop.
     ///
-    /// It can be revert to the actual `tag` value using method `cancel_tag`
+    /// It can be prevent by using `cancel_tag`.
     pub fn new_tag(&self) -> VersionTag {
         self.new_tag
     }
-
-    /// Actual tag. It will be replaced by the `new_tag` on drop.
-    pub fn tag(&self) -> VersionTag {
-        self.guard.deref().1
-    }
 }
 
-impl<T> Deref for WriteGuard<T> {
+impl<T: SetTag> Deref for WriteGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        self.guard.deref().0.as_ref().expect("WriteGuard")
+        self.guard.deref().as_ref().expect("WriteGuard")
     }
 }
 
-impl<T> DerefMut for WriteGuard<T> {
+impl<T: SetTag> DerefMut for WriteGuard<T> {
     fn deref_mut(&mut self) -> &mut T {
-        self.guard.deref_mut().0.as_mut().expect("WriteGuard")
+        self.guard.deref_mut().as_mut().expect("WriteGuard")
     }
 }
 
-impl<T> Drop for WriteGuard<T> {
+impl<T: SetTag> Drop for WriteGuard<T> {
     fn drop(&mut self) {
-        self.guard.deref_mut().1 = self.new_tag;
+        if !self.cancel_tag {
+            if let Some(v) = &mut *self.guard {
+                v.set_tag(self.new_tag);
+            }
+        }
     }
 }
 
-pub struct WriteFut<T: LoadFromConn>(State<T>);
+pub struct WriteFut<T: LoadFromConn + SetTag>(State<T>);
 
-impl<T: LoadFromConn> WriteFut<T> {
-    pub(crate) fn load(conn_or_factory: ConnOrFactory, fut: RwLockWriteFut<LockValue<T>>) -> Self {
+impl<T: LoadFromConn + SetTag> WriteFut<T> {
+    pub(crate) fn load(conn_or_factory: ConnOrFactory, fut: RwLockWriteFut<Option<T>>) -> Self {
         let conn = Some(conn_or_factory);
         Self(State::Write(conn, fut))
     }
 }
 
-impl<T: LoadFromConn> Future for WriteFut<T> {
+impl<T: LoadFromConn + SetTag> Future for WriteFut<T> {
     type Item = (ConnOrFactory, WriteGuard<T>);
     type Error = Error;
 
@@ -87,7 +88,7 @@ impl<T: LoadFromConn> Future for WriteFut<T> {
                     let conn = ConnOrFactory::Connection(conn);
                     let mut guard = guard.take().expect("Guard");
 
-                    *guard = (Some(value), VersionTag::new());
+                    *guard = Some(value);
 
                     let guard = WriteGuard::new(guard);
                     return Ok(Async::Ready((conn, guard)));
@@ -97,7 +98,7 @@ impl<T: LoadFromConn> Future for WriteFut<T> {
                     let guard = try_ready!(f.poll().map_err(map_error));
                     let conn = conn.take().expect("ConnOrFactory");
 
-                    if guard.0.is_some() {
+                    if guard.is_some() {
                         let guard = WriteGuard::new(guard);
                         return Ok(Async::Ready((conn, guard)));
                     } else {
@@ -121,9 +122,9 @@ impl<T: LoadFromConn> Future for WriteFut<T> {
 
 enum State<T: LoadFromConn> {
     Connect(
-        Option<RwLockWriteGuard<LockValue<T>>>,
+        Option<RwLockWriteGuard<Option<T>>>,
         Box<dyn Future<Item = Connection, Error = Error>>,
     ),
-    Load(Option<RwLockWriteGuard<LockValue<T>>>, T::Future),
-    Write(Option<ConnOrFactory>, RwLockWriteFut<LockValue<T>>),
+    Load(Option<RwLockWriteGuard<Option<T>>>, T::Future),
+    Write(Option<ConnOrFactory>, RwLockWriteFut<Option<T>>),
 }

@@ -1,29 +1,23 @@
-use crate::{map_error, LockValue};
+use crate::map_error;
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLockReadFut, RwLockReadGuard};
 use std::ops::Deref;
 
-pub struct ReadOptGuard<T>(pub(crate) RwLockReadGuard<LockValue<T>>);
-
-impl<T> ReadOptGuard<T> {
-    pub fn tag(&self) -> version_tag::VersionTag {
-        self.0.deref().1
-    }
-}
+pub struct ReadOptGuard<T>(pub(crate) RwLockReadGuard<Option<T>>);
 
 impl<T> Deref for ReadOptGuard<T> {
     type Target = Option<T>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0.deref().0
+        &self.0.deref()
     }
 }
 
-pub struct ReadOptFut<T>(pub(crate) RwLockReadFut<LockValue<T>>);
+pub struct ReadOptFut<T>(pub(crate) RwLockReadFut<Option<T>>);
 
 impl<T> ReadOptFut<T> {
-    pub(crate) fn load(f: RwLockReadFut<LockValue<T>>) -> Self {
+    pub(crate) fn load(f: RwLockReadFut<Option<T>>) -> Self {
         Self(f)
     }
 }

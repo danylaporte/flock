@@ -1,18 +1,11 @@
-use crate::{map_error, AsRefTag, ConnOrFactory, LoadFromConn, LockValue, Tag};
+use crate::{map_error, ConnOrFactory, LoadFromConn};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLock, RwLockReadFut, RwLockReadGuard, RwLockWriteFut, RwLockWriteGuard};
 use mssql_client::Connection;
 use std::ops::Deref;
-use version_tag::VersionTag;
 
-pub struct ReadGuard<T>(pub(crate) RwLockReadGuard<LockValue<T>>);
-
-impl<T> ReadGuard<T> {
-    pub fn tag(&self) -> VersionTag {
-        self.0.deref().1
-    }
-}
+pub struct ReadGuard<T>(pub(crate) RwLockReadGuard<Option<T>>);
 
 impl<T> AsRef<T> for ReadGuard<T> {
     fn as_ref(&self) -> &T {
@@ -20,31 +13,22 @@ impl<T> AsRef<T> for ReadGuard<T> {
     }
 }
 
-impl<T> AsRefTag<T> for ReadGuard<T> {
-    fn as_ref_tag(&self) -> Tag<&T> {
-        Tag {
-            value: self.deref(),
-            tag: self.tag(),
-        }
-    }
-}
-
 impl<T> Deref for ReadGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        self.0.deref().0.as_ref().expect("ReadGuard")
+        self.0.deref().as_ref().expect("ReadGuard")
     }
 }
 
 pub struct ReadFut<T: LoadFromConn> {
     conn_or_factory: Option<ConnOrFactory>,
-    lock: RwLock<LockValue<T>>,
+    lock: RwLock<Option<T>>,
     state: State<T>,
 }
 
 impl<T: LoadFromConn> ReadFut<T> {
-    pub(crate) fn load(conn_or_factory: ConnOrFactory, lock: RwLock<LockValue<T>>) -> Self {
+    pub(crate) fn load(conn_or_factory: ConnOrFactory, lock: RwLock<Option<T>>) -> Self {
         Self {
             conn_or_factory: Some(conn_or_factory),
             state: State::Read(lock.read()),
@@ -71,7 +55,7 @@ impl<T: LoadFromConn> Future for ReadFut<T> {
                     let (conn, value) = try_ready!(f.poll());
 
                     self.conn_or_factory = Some(ConnOrFactory::Connection(conn));
-                    **guard = (Some(value), VersionTag::new());
+                    **guard = Some(value);
 
                     State::Read(self.lock.read())
                 }
@@ -79,7 +63,7 @@ impl<T: LoadFromConn> Future for ReadFut<T> {
                 State::Read(f) => {
                     let guard = try_ready!(f.poll().map_err(map_error));
 
-                    if guard.0.is_some() {
+                    if guard.is_some() {
                         let conn_or_factory = self.conn_or_factory.take().expect("ConnOrFactory");
                         return Ok(Async::Ready((conn_or_factory, ReadGuard(guard))));
                     }
@@ -90,7 +74,7 @@ impl<T: LoadFromConn> Future for ReadFut<T> {
                 State::Write(f) => {
                     let guard = try_ready!(f.poll().map_err(map_error));
 
-                    if guard.0.is_some() {
+                    if guard.is_some() {
                         State::Read(self.lock.read())
                     } else {
                         match self.conn_or_factory.take().expect("ConnOrFactory") {
@@ -112,10 +96,10 @@ impl<T: LoadFromConn> Future for ReadFut<T> {
 
 enum State<T: LoadFromConn> {
     Connect(
-        Option<RwLockWriteGuard<LockValue<T>>>,
+        Option<RwLockWriteGuard<Option<T>>>,
         Box<dyn Future<Item = Connection, Error = Error>>,
     ),
-    Load(RwLockWriteGuard<LockValue<T>>, T::Future),
-    Read(RwLockReadFut<LockValue<T>>),
-    Write(RwLockWriteFut<LockValue<T>>),
+    Load(RwLockWriteGuard<Option<T>>, T::Future),
+    Read(RwLockReadFut<Option<T>>),
+    Write(RwLockWriteFut<Option<T>>),
 }
