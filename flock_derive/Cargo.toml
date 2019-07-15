@@ -8,8 +8,13 @@ authors = ["Dany Laporte <dany_laporte@hotmail.com>"]
 proc-macro = true
 
 [dependencies]
+Inflector = "0.11"
+either = "1.5"
 proc-macro2 = "0.4"
 quote = "0.6"
 syn = { version = "0.15" }
+serde = "1.0"
+toml = "0.5"
 
 [dev-dependencies]
+flock = { path = "../flock" }

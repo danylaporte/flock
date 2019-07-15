@@ -1,9 +1,8 @@
-use crate::{map_error, SetTag};
+use crate::{map_error, SetTag, VersionTag};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLockWriteFut, RwLockWriteGuard};
 use std::ops::{Deref, DerefMut};
-use version_tag::VersionTag;
 
 pub struct WriteOptGuard<T: SetTag> {
     cancel_tag: bool,
