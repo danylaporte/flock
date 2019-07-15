@@ -1,3 +1,4 @@
+mod as_lock;
 mod conn_or_factory;
 mod load_from_conn;
 mod lock;
@@ -9,6 +10,7 @@ mod write_opt;
 
 pub(crate) use self::conn_or_factory::ConnOrFactory;
 
+pub use self::as_lock::AsLock;
 pub use self::load_from_conn::LoadFromConn;
 pub use self::lock::Lock;
 pub use self::read::{ReadFut, ReadGuard};
