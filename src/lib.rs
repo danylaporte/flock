@@ -1,3 +1,4 @@
+mod as_ref_tag;
 mod conn_or_factory;
 mod guard;
 mod load_from_conn;
@@ -9,6 +10,7 @@ mod write_opt;
 
 pub(crate) use self::conn_or_factory::ConnOrFactory;
 
+pub use self::as_ref_tag::*;
 pub use self::guard::WGuard;
 pub use self::load_from_conn::LoadFromConn;
 pub use self::lock::Lock;

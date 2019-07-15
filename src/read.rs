@@ -1,4 +1,4 @@
-use crate::{map_error, ConnOrFactory, LoadFromConn, LockValue};
+use crate::{map_error, AsRefTag, ConnOrFactory, LoadFromConn, LockValue};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLock, RwLockReadFut, RwLockReadGuard, RwLockWriteFut, RwLockWriteGuard};
@@ -11,6 +11,18 @@ pub struct ReadGuard<T>(pub(crate) RwLockReadGuard<LockValue<T>>);
 impl<T> ReadGuard<T> {
     pub fn tag(&self) -> VersionTag {
         self.0.deref().1
+    }
+}
+
+impl<T> AsRef<T> for ReadGuard<T> {
+    fn as_ref(&self) -> &T {
+        self.deref()
+    }
+}
+
+impl<T> AsRefTag<T> for ReadGuard<T> {
+    fn tag(&self) -> VersionTag {
+        self.tag()
     }
 }
 
