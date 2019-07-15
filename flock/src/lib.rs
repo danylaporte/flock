@@ -1,3 +1,5 @@
+pub extern crate lazy_static;
+
 mod as_lock;
 mod conn_or_factory;
 mod load_from_conn;

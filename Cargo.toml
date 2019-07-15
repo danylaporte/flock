@@ -1,14 +1,5 @@
-[package]
-name = "flock"
-version = "0.1.0"
-authors = ["Dany Laporte <dany_laporte@hotmail.com>"]
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-failure = "0.1"
-futures = "0.1"
-futures-locks = "0.3"
-mssql_client = { git = "https://github.com/danylaporte/mssql_client.git" }
-version_tag = { git = "https://github.com/danylaporte/version_tag.git" }
+[workspace]
+members = [
+    "flock",
+    "flock_derive"
+]
