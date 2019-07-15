@@ -1,4 +1,4 @@
-use crate::{map_error, AsRefTag, ConnOrFactory, LoadFromConn, LockValue};
+use crate::{map_error, AsRefTag, ConnOrFactory, LoadFromConn, LockValue, Tag};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLock, RwLockReadFut, RwLockReadGuard, RwLockWriteFut, RwLockWriteGuard};
@@ -21,8 +21,11 @@ impl<T> AsRef<T> for ReadGuard<T> {
 }
 
 impl<T> AsRefTag<T> for ReadGuard<T> {
-    fn tag(&self) -> VersionTag {
-        self.tag()
+    fn as_ref_tag(&self) -> Tag<&T> {
+        Tag {
+            value: self.deref(),
+            tag: self.tag(),
+        }
     }
 }
 

@@ -1,3 +1,5 @@
+use crate::Tag;
+
 pub trait AsRefTag<T>: AsRef<T> {
-    fn tag(&self) -> version_tag::VersionTag;
+    fn as_ref_tag(&self) -> Tag<&T>;
 }

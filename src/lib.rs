@@ -5,6 +5,7 @@ mod load_from_conn;
 mod lock;
 mod read;
 mod read_opt;
+mod tag;
 mod write;
 mod write_opt;
 
@@ -16,6 +17,7 @@ pub use self::load_from_conn::LoadFromConn;
 pub use self::lock::Lock;
 pub use self::read::{ReadFut, ReadGuard};
 pub use self::read_opt::{ReadOptFut, ReadOptGuard};
+pub use self::tag::Tag;
 pub use self::write::{WriteFut, WriteGuard};
 pub use self::write_opt::{WriteOptFut, WriteOptGuard};
 
