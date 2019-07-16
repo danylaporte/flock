@@ -12,7 +12,7 @@ Inflector = "0.11"
 either = "1.5"
 proc-macro2 = "0.4"
 quote = "0.6"
-syn = { version = "0.15" }
+syn = { version = "0.15" , features = [ "parsing" ] }
 serde = "1.0"
 toml = "0.5"
 

@@ -5,9 +5,10 @@ use quote::quote;
 use std::collections::hash_map::{Entry, HashMap};
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
-use syn::{bracketed, parse_macro_input, Error, Ident, Token};
+use syn::spanned::Spanned;
+use syn::{bracketed, parse_macro_input, parse_str, Error, Ident, Token, Type};
 
-type Config = HashMap<String, Vec<String>>;
+type Config = HashMap<String, Vec<Type>>;
 
 pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let args = parse_macro_input!(item as Args);
@@ -39,7 +40,22 @@ fn load_config() -> Config {
         panic!("Failed to open `{}`; {}", p.display(), e);
     });
 
-    toml::from_str(&s).expect("deserialize lock_derive.toml")
+    let config: HashMap<String, Vec<String>> =
+        toml::from_str(&s).expect("deserialize lock_derive.toml");
+
+    let mut out = HashMap::with_capacity(config.len());
+
+    for (key, value) in config {
+        out.insert(
+            key,
+            value
+                .into_iter()
+                .map(|v| parse_str(&v).expect("unparsable type"))
+                .collect(),
+        );
+    }
+
+    out
 }
 
 #[derive(Clone, Copy)]
@@ -99,6 +115,10 @@ struct Args {
     fields: Vec<Field>,
 }
 
+fn ty_to_string(t: &Type) -> String {
+    quote!(#t).to_string()
+}
+
 impl Parse for Args {
     fn parse(stream: ParseStream) -> Result<Self> {
         let mut set = HashMap::new();
@@ -111,23 +131,27 @@ impl Parse for Args {
             let content;
             bracketed!(content in stream);
 
-            let punctuated = <Punctuated<Ident, Token![,]>>::parse_terminated(&content)?;
+            let punctuated = <Punctuated<Type, Token![,]>>::parse_terminated(&content)?;
             let vec = punctuated.into_iter().collect::<Vec<_>>();
 
-            for ident in vec {
-                let s = ident.to_string();
+            for ty in vec {
+                let s = ty_to_string(&ty);
 
                 let names = config
                     .get(&s)
                     .as_ref()
                     .map(|v| Either::Left(v.iter()))
-                    .unwrap_or_else(|| Either::Right(std::iter::once(&s)));
+                    .unwrap_or_else(|| Either::Right(std::iter::once(&ty)));
 
                 for name in names {
-                    match set.entry(name.clone()) {
+                    let s = ty_to_string(&name);
+                    let key = s.split("::").last().expect("key").trim().to_string();
+                    let member = Ident::new(&key.to_snake_case(), ty.span());
+
+                    match set.entry(key) {
                         Entry::Vacant(v) => {
-                            let ident = Ident::new(name, ident.span());
-                            v.insert(Field { ident, access });
+                            let ty = name.clone();
+                            v.insert(Field { access, member, ty });
                         }
                         Entry::Occupied(mut o) => {
                             o.get_mut().access += access;
@@ -138,7 +162,7 @@ impl Parse for Args {
         }
 
         let mut fields = set.into_iter().map(|(_, v)| v).collect::<Vec<_>>();
-        fields.sort_unstable_by(|a, b| a.ident.cmp(&b.ident));
+        fields.sort_unstable_by(|a, b| a.member.cmp(&b.member));
 
         Ok(Self { fields })
     }
@@ -146,19 +170,16 @@ impl Parse for Args {
 
 struct Field {
     access: Access,
-    ident: Ident,
+    member: Ident,
+    ty: Type,
 }
 
 fn impl_resolve(args: &Args) -> TokenStream {
-    let fields = args.fields.iter().map(|f| {
-        let v = Ident::new(&f.ident.to_string().to_snake_case(), f.ident.span());
-        quote! { #v }
-    });
-
+    let fields = args.fields.iter().map(|f| &f.member);
     let mut inner_code = Some(quote! { Ok(Locks { #(#fields,)* }) });
 
     for f in args.fields.iter() {
-        let ident = &f.ident;
+        let t = &f.ty;
 
         let access = match f.access {
             Access::Read => quote! { read(conn) },
@@ -167,10 +188,10 @@ fn impl_resolve(args: &Args) -> TokenStream {
             Access::WriteOpt => quote! { write_opt() },
         };
 
-        let v = Ident::new(&ident.to_string().to_snake_case(), ident.span());
+        let v = &f.member;
         let code = inner_code.take().expect("inner_code");
 
-        inner_code = Some(quote! { #ident::as_lock().#access.and_then(move|(conn, #v)| #code) });
+        inner_code = Some(quote! { #t::as_lock().#access.and_then(move|(conn, #v)| #code) });
     }
 
     let code = inner_code.expect("inner_code");
@@ -191,8 +212,8 @@ fn impl_resolve(args: &Args) -> TokenStream {
 
 fn impl_struct(args: &Args) -> TokenStream {
     let fields = args.fields.iter().map(|f| {
-        let t = &f.ident;
-        let n = Ident::new(&t.to_string().to_snake_case(), f.ident.span());
+        let t = &f.ty;
+        let n = &f.member;
 
         match f.access {
             Access::Read => quote! { #n: flock::ReadGuard<#t> },
@@ -211,8 +232,8 @@ fn impl_struct(args: &Args) -> TokenStream {
 
 fn impl_as_muts(args: &Args) -> TokenStream {
     let fields = args.fields.iter().filter(|f| f.access.is_write()).map(|f| {
-        let t = &f.ident;
-        let n = Ident::new(&t.to_string().to_snake_case(), t.span());
+        let t = &f.ty;
+        let n = &f.member;
 
         quote! {
             impl AsMut<#t> for Locks {
@@ -228,8 +249,8 @@ fn impl_as_muts(args: &Args) -> TokenStream {
 
 fn impl_as_refs(args: &Args) -> TokenStream {
     let fields = args.fields.iter().map(|f| {
-        let t = &f.ident;
-        let n = Ident::new(&t.to_string().to_snake_case(), t.span());
+        let t = &f.ty;
+        let n = &f.member;
 
         quote! {
             impl AsRef<#t> for Locks {
