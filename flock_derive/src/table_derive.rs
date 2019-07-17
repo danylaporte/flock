@@ -42,11 +42,11 @@ fn get_field_by_name<'a>(input: &'a DeriveInput, name: &str) -> Option<&'a Field
 fn impl_deref(input: &DeriveInput) -> TokenStream {
     if let Some(entities_field) = get_field_by_name(input, "entities") {
         let field_ty = &entities_field.ty;
-        let generics = &input.generics;
+        let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
         let t = &input.ident;
 
         quote! {
-            impl #generics std::ops::Deref for #t #generics {
+            impl #impl_generics std::ops::Deref for #t #ty_generics #where_clause {
                 type Target = #field_ty;
 
                 fn deref(&self) -> &Self::Target {
@@ -54,7 +54,7 @@ fn impl_deref(input: &DeriveInput) -> TokenStream {
                 }
             }
 
-            impl #generics std::ops::DerefMut for #t #generics {
+            impl #impl_generics std::ops::DerefMut for #t #ty_generics #where_clause {
                 fn deref_mut(&mut self) -> &mut Self::Target {
                     &mut self.entities
                 }
@@ -66,11 +66,11 @@ fn impl_deref(input: &DeriveInput) -> TokenStream {
 }
 
 fn impl_as_mut(input: &DeriveInput) -> TokenStream {
-    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let t = &input.ident;
 
     quote! {
-        impl #generics AsMut<#t> for #t {
+        impl #impl_generics AsMut<#t #ty_generics> for #t #ty_generics #where_clause {
             fn as_mut(&mut self) -> &mut Self {
                 self
             }
@@ -79,11 +79,11 @@ fn impl_as_mut(input: &DeriveInput) -> TokenStream {
 }
 
 fn impl_as_ref(input: &DeriveInput) -> TokenStream {
-    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let t = &input.ident;
 
     quote! {
-        impl #generics AsRef<#t> for #t {
+        impl #impl_generics AsRef<#t #ty_generics> for #t #ty_generics #where_clause {
             fn as_ref(&self) -> &Self {
                 self
             }
@@ -92,26 +92,30 @@ fn impl_as_ref(input: &DeriveInput) -> TokenStream {
 }
 
 fn impl_load_test(input: &DeriveInput) -> TokenStream {
-    let t = &input.ident;
+    if input.generics.params.is_empty() {
+        let t = &input.ident;
 
-    quote! {
-        #[test]
-        fn test_load() {
-            use tokio::executor::current_thread::block_on_all;
-            use flock::LoadFromConn;
+        quote! {
+            #[test]
+            fn test_load() {
+                use tokio::executor::current_thread::block_on_all;
+                use flock::LoadFromConn;
 
-            let fut = mssql_client::Connection::from_env("COT_DB").and_then(#t::load_from_conn);
-            block_on_all(fut).unwrap();
+                let fut = mssql_client::Connection::from_env("COT_DB").and_then(#t::load_from_conn);
+                block_on_all(fut).unwrap();
+            }
         }
+    } else {
+        quote! {}
     }
 }
 
 fn impl_set_tag(input: &DeriveInput) -> TokenStream {
     let t = &input.ident;
-    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     quote! {
-        impl #generics flock::SetTag for #t {
+        impl #impl_generics flock::SetTag for #t #ty_generics #where_clause {
             fn set_tag(&mut self, tag: flock::VersionTag) {
                 self.tag = tag;
             }
@@ -121,10 +125,10 @@ fn impl_set_tag(input: &DeriveInput) -> TokenStream {
 
 fn impl_tag(input: &DeriveInput) -> TokenStream {
     let t = &input.ident;
-    let generics = &input.generics;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     quote! {
-        impl #generics #t #generics {
+        impl #impl_generics #t #ty_generics #where_clause {
             pub fn tag(&self) -> flock::VersionTag {
                 self.tag
             }
@@ -133,20 +137,23 @@ fn impl_tag(input: &DeriveInput) -> TokenStream {
 }
 
 fn impl_lock(input: &DeriveInput) -> TokenStream {
-    let generics = &input.generics;
-    let t = &input.ident;
+    if input.generics.params.is_empty() {
+        let t = &input.ident;
 
-    quote! {
-        impl #generics flock::AsLock for #t #generics {
-            type Lock = &'static flock::Lock<Self>;
+        quote! {
+            impl flock::AsLock for #t {
+                type Lock = &'static flock::Lock<Self>;
 
-            fn as_lock() -> Self::Lock {
-                flock::lazy_static::lazy_static! {
-                    static ref LOCK: flock::Lock<#t> = flock::Lock::default();
+                fn as_lock() -> Self::Lock {
+                    flock::lazy_static::lazy_static! {
+                        static ref LOCK: flock::Lock<#t> = flock::Lock::default();
+                    }
+
+                    &*LOCK
                 }
-
-                &*LOCK
             }
         }
+    } else {
+        quote! {}
     }
 }
