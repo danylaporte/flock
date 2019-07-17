@@ -15,15 +15,16 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let as_muts = impl_as_muts(&args);
     let as_refs = impl_as_refs(&args);
     let locks = impl_struct(&args);
-    let resolve = impl_resolve(&args);
+    let locks_fut = locks_fut(&args);
 
     quote!({
+        use flock::{ConnOrFactory, LockStates, ReadGuard, ReadFut, ReadOptGuard, ReadOptFut, WriteGuard, WriteOptGuard, WriteFut, WriteOptFut};
+        use futures::{Async, Future, Poll};
+
+        #locks
         #as_muts
         #as_refs
-        #locks
-        #resolve
-
-        Locks::resolve()
+        #locks_fut
     })
     .into()
 }
@@ -174,38 +175,75 @@ struct Field {
     ty: Type,
 }
 
-fn impl_resolve(args: &Args) -> TokenStream {
-    let fields = args.fields.iter().map(|f| &f.member);
-    let mut inner_code = Some(quote! { Ok(Locks { #(#fields,)* }) });
-
-    for f in args.fields.iter() {
+fn locks_fut(args: &Args) -> TokenStream {
+    let declare_fields = args.fields.iter().map(|f| {
         let t = &f.ty;
+        let n = &f.member;
 
-        let access = match f.access {
-            Access::Read => quote! { read(conn) },
-            Access::ReadOpt => quote! { read_opt() },
-            Access::Write => quote! { write(conn) },
-            Access::WriteOpt => quote! { write_opt() },
-        };
+        match f.access {
+            Access::Read => quote! { #n: LockStates<ReadFut<#t>, ReadGuard<#t>> },
+            Access::ReadOpt => quote! { #n: LockStates<ReadOptFut<#t>, ReadOptGuard<#t>> },
+            Access::Write => quote! { #n: LockStates<WriteFut<#t>, WriteGuard<#t>> },
+            Access::WriteOpt => quote! { #n: LockStates<WriteOptFut<#t>, WriteOptGuard<#t>> },
+        }
+    });
 
-        let v = &f.member;
-        let code = inner_code.take().expect("inner_code");
-
-        inner_code = Some(quote! { #t::as_lock().#access.and_then(move|(conn, #v)| #code) });
-    }
-
-    let code = inner_code.expect("inner_code");
+    let impl_future = impl_future_for_locks_fut(args);
+    let init_locks_fut = init_locks_fut(args);
 
     quote! {
-        impl Locks {
-            fn resolve() -> impl futures::Future<Item = Self, Error = failure::Error> {
-                use flock::{ConnOrFactory, ConnectionFactory, AsLock};
-                use futures::Future;
+        struct LocksFut {
+            conn: Option<ConnOrFactory>,
+            #(#declare_fields,)*
+        }
 
-                let conn = ConnOrFactory::Factory(ConnectionFactory::from_env("COT_DB").expect("COT_DB"));
+        #impl_future
 
-                #code.map(|(_conn, locks)| locks)
+        #init_locks_fut
+    }
+}
+
+fn impl_future_for_locks_fut(args: &Args) -> TokenStream {
+    let fields = args.fields.iter().map(|f| {
+        let n = &f.member;
+        quote! { #n: self.#n.take() }
+    });
+
+    let mut code = Some(quote! { return Ok(Async::Ready(Locks { #(#fields,)* })); });
+
+    for f in &args.fields {
+        let n = &f.member;
+        let c = code.take().expect("code");
+
+        code = Some(quote! { if self.#n.poll(&mut self.conn)? { #c } });
+    }
+
+    let c = code.take().expect("code");
+
+    quote! {
+        impl Future for LocksFut {
+            type Item = Locks;
+            type Error = failure::Error;
+
+            fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+                #c
+
+                Ok(Async::NotReady)
             }
+        }
+    }
+}
+
+fn init_locks_fut(args: &Args) -> TokenStream {
+    let fields = args.fields.iter().map(|f| {
+        let n = &f.member;
+        quote! { #n: LockStates::None }
+    });
+
+    quote! {
+        LocksFut {
+            conn: Some(ConnOrFactory::Factory(flock::ConnectionFactory::from_env("COT_DB").expect("ConnectionFactory"))),
+            #(#fields,)*
         }
     }
 }
@@ -216,10 +254,10 @@ fn impl_struct(args: &Args) -> TokenStream {
         let n = &f.member;
 
         match f.access {
-            Access::Read => quote! { #n: flock::ReadGuard<#t> },
-            Access::ReadOpt => quote! { #n: flock::ReadOptGuard<#t> },
-            Access::Write => quote! { #n: flock::WriteGuard<#t> },
-            Access::WriteOpt => quote! { #n: flock::WriteOptGuard<#t> },
+            Access::Read => quote! { #n: ReadGuard<#t> },
+            Access::ReadOpt => quote! { #n: ReadOptGuard<#t> },
+            Access::Write => quote! { #n: WriteGuard<#t> },
+            Access::WriteOpt => quote! { #n: WriteOptGuard<#t> },
         }
     });
 

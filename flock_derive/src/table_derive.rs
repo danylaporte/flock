@@ -142,9 +142,7 @@ fn impl_lock(input: &DeriveInput) -> TokenStream {
 
         quote! {
             impl flock::AsLock for #t {
-                type Lock = &'static flock::Lock<Self>;
-
-                fn as_lock() -> Self::Lock {
+                fn as_lock() -> &'static flock::Lock<Self> {
                     flock::lazy_static::lazy_static! {
                         static ref LOCK: flock::Lock<#t> = flock::Lock::default();
                     }

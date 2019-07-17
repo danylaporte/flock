@@ -1,4 +1,5 @@
-pub trait AsLock: Sized {
-    type Lock;
-    fn as_lock() -> Self::Lock;
+use crate::Lock;
+
+pub trait AsLock: Sized + 'static {
+    fn as_lock() -> &'static Lock<Self>;
 }
