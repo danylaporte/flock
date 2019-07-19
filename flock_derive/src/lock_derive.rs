@@ -1,12 +1,13 @@
 use either::Either;
 use inflector::Inflector;
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use std::collections::hash_map::{Entry, HashMap};
+use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{bracketed, parse_macro_input, parse_str, Error, Ident, Token, Type};
+use syn::{bracketed, parse_macro_input, parse_str, Error, Ident, LitStr, Token, Type};
 
 type Config = HashMap<String, Vec<Type>>;
 
@@ -16,10 +17,13 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let as_refs = impl_as_refs(&args);
     let locks = impl_struct(&args);
     let locks_fut = locks_fut(&args);
+    let dir = LitStr::new(&format!("{}", config_dir().display()), Span::call_site());
 
     quote!({
-        use flock::{ConnOrFactory, LockStates, ReadGuard, ReadFut, ReadOptGuard, ReadOptFut, WriteGuard, WriteOptGuard, WriteFut, WriteOptFut};
+        use flock::{ConnOrFactory, LockStates, ReadGuard, ReadFut, AsMutOpt, ReadOptGuard, ReadOptFut, WriteGuard, WriteOptGuard, WriteFut, WriteOptFut};
         use futures::{Async, Future, Poll};
+
+        include_str!(#dir);
 
         #locks
         #as_muts
@@ -29,13 +33,18 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     .into()
 }
 
-fn load_config() -> Config {
+fn config_dir() -> PathBuf {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR")
         .replace("\\", "/");
 
-    let mut p = std::path::PathBuf::from(manifest_dir);
+    let mut p = PathBuf::from(manifest_dir);
     p.set_file_name("lock_derive.toml");
+    p
+}
+
+fn load_config() -> Config {
+    let p = config_dir();
 
     let s = std::fs::read_to_string(&p).unwrap_or_else(|e| {
         panic!("Failed to open `{}`; {}", p.display(), e);
@@ -65,15 +74,6 @@ enum Access {
     ReadOpt,
     Write,
     WriteOpt,
-}
-
-impl Access {
-    fn is_write(self) -> bool {
-        match self {
-            Access::Read | Access::ReadOpt => false,
-            Access::Write | Access::WriteOpt => true,
-        }
-    }
 }
 
 impl std::ops::AddAssign for Access {
@@ -269,16 +269,38 @@ fn impl_struct(args: &Args) -> TokenStream {
 }
 
 fn impl_as_muts(args: &Args) -> TokenStream {
-    let fields = args.fields.iter().filter(|f| f.access.is_write()).map(|f| {
+    let fields = args.fields.iter().filter_map(|f| {
         let t = &f.ty;
         let n = &f.member;
 
-        quote! {
-            impl AsMut<#t> for Locks {
-                fn as_mut(&mut self) -> &mut #t {
-                    &mut *self.#n
+        match f.access {
+            Access::Read | Access::ReadOpt => None,
+            Access::Write => Some(quote! {
+                impl AsMut<#t> for Locks {
+                    fn as_mut(&mut self) -> &mut #t {
+                        self.#n.as_mut()
+                    }
                 }
-            }
+
+                impl AsMutOpt<#t> for Locks {
+                    fn as_mut_opt(&mut self) -> Option<&mut #t> {
+                        self.#n.as_mut_opt()
+                    }
+                }
+            }),
+            Access::WriteOpt => Some(quote! {
+                impl AsMut<Option<#t>> for Locks {
+                    fn as_mut(&mut self) -> &mut Option<#t> {
+                        self.#n.as_mut()
+                    }
+                }
+
+                impl AsMutOpt<#t> for Locks {
+                    fn as_mut_opt(&mut self) -> Option<&mut #t> {
+                        self.#n.as_mut_opt()
+                    }
+                }
+            }),
         }
     });
 
@@ -290,12 +312,27 @@ fn impl_as_refs(args: &Args) -> TokenStream {
         let t = &f.ty;
         let n = &f.member;
 
-        quote! {
-            impl AsRef<#t> for Locks {
-                fn as_ref(&self) -> &#t {
-                    &*self.#n
+        match f.access {
+            Access::Read | Access::Write => quote! {
+                impl AsRef<#t> for Locks {
+                    fn as_ref(&self) -> &#t {
+                        self.#n.as_ref()
+                    }
                 }
-            }
+
+                impl AsRef<Option<#t>> for Locks {
+                    fn as_ref(&self) -> &Option<#t> {
+                        self.#n.as_ref()
+                    }
+                }
+            },
+            Access::ReadOpt | Access::WriteOpt => quote! {
+                impl AsRef<Option<#t>> for Locks {
+                    fn as_ref(&self) -> &Option<#t> {
+                        self.#n.as_ref()
+                    }
+                }
+            },
         }
     });
 

@@ -1,4 +1,4 @@
-use crate::{map_error, ConnOrFactory, LoadFromConn, SetTag, VersionTag};
+use crate::{map_error, AsMutOpt, ConnOrFactory, LoadFromConn, SetTag, VersionTag};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLockWriteFut, RwLockWriteGuard};
@@ -35,6 +35,24 @@ impl<T: SetTag> WriteGuard<T> {
     }
 }
 
+impl<T: SetTag> AsMutOpt<T> for WriteGuard<T> {
+    fn as_mut_opt(&mut self) -> Option<&mut T> {
+        self.guard.as_mut()
+    }
+}
+
+impl<T: SetTag> AsRef<Option<T>> for WriteGuard<T> {
+    fn as_ref(&self) -> &Option<T> {
+        self.guard.deref()
+    }
+}
+
+impl<T: SetTag> AsRef<T> for WriteGuard<T> {
+    fn as_ref(&self) -> &T {
+        self.deref()
+    }
+}
+
 impl<T: SetTag> Deref for WriteGuard<T> {
     type Target = T;
 
@@ -58,7 +76,6 @@ impl<T: SetTag> Drop for WriteGuard<T> {
         }
     }
 }
-
 pub struct WriteFut<T: LoadFromConn + SetTag>(State<T>);
 
 impl<T: LoadFromConn + SetTag> WriteFut<T> {

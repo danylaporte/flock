@@ -1,4 +1,4 @@
-use crate::{map_error, SetTag, VersionTag};
+use crate::{map_error, AsMutOpt, SetTag, VersionTag};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLockWriteFut, RwLockWriteGuard};
@@ -8,6 +8,24 @@ pub struct WriteOptGuard<T: SetTag> {
     cancel_tag: bool,
     guard: RwLockWriteGuard<Option<T>>,
     new_tag: VersionTag,
+}
+
+impl<T: SetTag> AsMut<Option<T>> for WriteOptGuard<T> {
+    fn as_mut(&mut self) -> &mut Option<T> {
+        self.guard.deref_mut()
+    }
+}
+
+impl<T: SetTag> AsMutOpt<T> for WriteOptGuard<T> {
+    fn as_mut_opt(&mut self) -> Option<&mut T> {
+        self.guard.as_mut()
+    }
+}
+
+impl<T: SetTag> AsRef<Option<T>> for WriteOptGuard<T> {
+    fn as_ref(&self) -> &Option<T> {
+        self.guard.deref()
+    }
 }
 
 impl<T: SetTag> WriteOptGuard<T> {

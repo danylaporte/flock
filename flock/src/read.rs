@@ -13,6 +13,12 @@ impl<T> AsRef<T> for ReadGuard<T> {
     }
 }
 
+impl<T> AsRef<Option<T>> for ReadGuard<T> {
+    fn as_ref(&self) -> &Option<T> {
+        self.0.deref()
+    }
+}
+
 impl<T> Deref for ReadGuard<T> {
     type Target = T;
 
