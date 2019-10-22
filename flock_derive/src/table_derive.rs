@@ -1,6 +1,7 @@
+use inflector::Inflector;
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Field, Fields};
+use syn::{parse_macro_input, Data, DeriveInput, Field, Fields, Ident};
 
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -98,10 +99,10 @@ fn impl_load_test(input: &DeriveInput) -> TokenStream {
         quote! {
             #[test]
             fn test_load() {
-                use tokio::executor::current_thread::block_on_all;
+                use flock::tokio::executor::current_thread::block_on_all;
                 use flock::LoadFromConn;
 
-                let fut = mssql_client::Connection::from_env("COT_DB").and_then(#t::load_from_conn);
+                let fut = flock::mssql_client::Connection::from_env("DB").and_then(#t::load_from_conn);
                 block_on_all(fut).unwrap();
             }
         }
@@ -116,7 +117,7 @@ fn impl_set_tag(input: &DeriveInput) -> TokenStream {
 
     quote! {
         impl #impl_generics flock::SetTag for #t #ty_generics #where_clause {
-            fn set_tag(&mut self, tag: flock::VersionTag) {
+            fn set_tag(&mut self, tag: flock::version_tag::VersionTag) {
                 self.tag = tag;
             }
         }
@@ -129,7 +130,7 @@ fn impl_tag(input: &DeriveInput) -> TokenStream {
 
     quote! {
         impl #impl_generics #t #ty_generics #where_clause {
-            pub fn tag(&self) -> flock::VersionTag {
+            pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
             }
         }
@@ -138,16 +139,16 @@ fn impl_tag(input: &DeriveInput) -> TokenStream {
 
 fn impl_lock(input: &DeriveInput) -> TokenStream {
     if input.generics.params.is_empty() {
-        let t = &input.ident;
+        let ident = &input.ident;
+        let lock = format!("{}_LOCK", &ident).to_screaming_snake_case();
+        let lock = Ident::new(&lock, ident.span());
 
         quote! {
-            impl flock::AsLock for #t {
-                fn as_lock() -> &'static flock::Lock<Self> {
-                    flock::lazy_static::lazy_static! {
-                        static ref LOCK: flock::Lock<#t> = flock::Lock::default();
-                    }
+            static #lock: flock::Lock<#ident> = flock::Lock::new();
 
-                    &*LOCK
+            impl flock::AsLock for #ident {
+                fn as_lock() -> &'static flock::Lock<Self> {
+                    &#lock
                 }
             }
         }

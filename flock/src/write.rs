@@ -1,9 +1,10 @@
-use crate::{map_error, AsMutOpt, ConnOrFactory, LoadFromConn, SetTag, VersionTag};
+use crate::{map_error, AsMutOpt, ConnOrFactory, LoadFromConn, SetTag};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLockWriteFut, RwLockWriteGuard};
 use mssql_client::Connection;
 use std::ops::{Deref, DerefMut};
+use version_tag::VersionTag;
 
 pub struct WriteGuard<T: SetTag> {
     cancel_tag: bool,

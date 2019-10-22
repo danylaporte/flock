@@ -1,43 +1,40 @@
 use crate::{ConnOrFactory, LoadFromConn, ReadFut, ReadOptFut, SetTag, WriteFut, WriteOptFut};
 use futures_locks::RwLock;
+use once_cell::sync::OnceCell;
 
-pub struct Lock<T>(RwLock<Option<T>>);
+pub struct Lock<T>(OnceCell<RwLock<Option<T>>>);
 
 impl<T> Lock<T> {
-    pub fn new(value: Option<T>) -> Self {
-        Self(RwLock::new(value))
+    pub const fn new() -> Self {
+        Self(OnceCell::new())
     }
 
-    pub fn read<C>(&self, conn: C) -> ReadFut<T>
+    fn get(&self) -> &RwLock<Option<T>> {
+        self.0.get_or_init(|| RwLock::new(None))
+    }
+
+    pub fn read(&self, conn: ConnOrFactory) -> ReadFut<T>
     where
-        C: Into<ConnOrFactory>,
         T: LoadFromConn,
     {
-        ReadFut::load(conn.into(), self.0.clone())
+        ReadFut::load(conn, self.get().clone())
     }
 
     pub fn read_opt(&self) -> ReadOptFut<T> {
-        ReadOptFut::load(self.0.read())
+        ReadOptFut::load(self.get().read())
     }
 
-    pub fn write<C>(&self, conn: C) -> WriteFut<T>
+    pub fn write(&self, conn: ConnOrFactory) -> WriteFut<T>
     where
-        C: Into<ConnOrFactory>,
         T: LoadFromConn + SetTag,
     {
-        WriteFut::load(conn.into(), self.0.write())
+        WriteFut::load(conn, self.get().write())
     }
 
     pub fn write_opt(&self) -> WriteOptFut<T>
     where
         T: SetTag,
     {
-        WriteOptFut::load(self.0.write())
-    }
-}
-
-impl<T> Default for Lock<T> {
-    fn default() -> Self {
-        Self(RwLock::new(None))
+        WriteOptFut::load(self.get().write())
     }
 }

@@ -1,6 +1,6 @@
 use either::Either;
 use inflector::Inflector;
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::hash_map::{Entry, HashMap};
 use std::path::PathBuf;
@@ -17,11 +17,21 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let as_refs = impl_as_refs(&args);
     let locks = impl_struct(&args);
     let locks_fut = locks_fut(&args);
-    let dir = LitStr::new(&format!("{}", config_dir().display()), Span::call_site());
+    let dir = LitStr::new(
+        &format!("{}", config_dir().display()),
+        args.fields
+            .iter()
+            .map(|f| f.member.span())
+            .next()
+            .expect("field"),
+    );
 
     quote!({
-        use flock::{ConnOrFactory, LockStates, ReadGuard, ReadFut, AsMutOpt, ReadOptGuard, ReadOptFut, WriteGuard, WriteOptGuard, WriteFut, WriteOptFut};
-        use futures::{Async, Future, Poll};
+        use flock::{
+            futures::{Async, Future, Poll},
+            AsMutOpt, ConnOrFactory, LockStates, ReadFut, ReadGuard, ReadOptFut, ReadOptGuard,
+            WriteFut, WriteGuard, WriteOptFut, WriteOptGuard,
+        };
 
         include_str!(#dir);
 
@@ -223,7 +233,7 @@ fn impl_future_for_locks_fut(args: &Args) -> TokenStream {
     quote! {
         impl Future for LocksFut {
             type Item = Locks;
-            type Error = failure::Error;
+            type Error = flock::failure::Error;
 
             fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
                 #c
@@ -242,7 +252,7 @@ fn init_locks_fut(args: &Args) -> TokenStream {
 
     quote! {
         LocksFut {
-            conn: Some(ConnOrFactory::Factory(flock::ConnectionFactory::from_env("COT_DB").expect("ConnectionFactory"))),
+            conn: Some(ConnOrFactory::Factory(flock::mssql_client::ConnectionFactory::from_env("DB").expect("ConnectionFactory"))),
             #(#fields,)*
         }
     }

@@ -12,9 +12,10 @@ Inflector = "0.11"
 either = "1.5"
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "1.0" , features = [ "parsing" ] }
 serde = "1.0"
+syn = { version = "1.0" , features = ["full"] }
 toml = "0.5"
 
 [dev-dependencies]
 flock = { path = "../flock" }
+uuid = { version = "0.8" , features = ["v4"] }
