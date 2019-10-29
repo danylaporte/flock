@@ -42,7 +42,12 @@ impl<T> VecOpt<T> {
     }
 
     pub fn remove(&mut self, idx: usize) {
-        if replace(&mut self.vec[idx], None).is_some() {
+        if self
+            .vec
+            .get_mut(idx)
+            .and_then(|v| replace(v, None))
+            .is_some()
+        {
             self.len -= 1;
         }
     }

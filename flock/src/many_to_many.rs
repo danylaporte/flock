@@ -19,7 +19,7 @@ impl<L, R> ManyToMany<L, R> {
         ManyIter(
             self.left
                 .get(id.into())
-                .map(|v| &v[..])
+                .map(|v| v.as_slice())
                 .unwrap_or(&[])
                 .into_iter(),
         )
@@ -33,7 +33,7 @@ impl<L, R> ManyToMany<L, R> {
         ManyIter(
             self.right
                 .get(id.into())
-                .map(|v| &v[..])
+                .map(|v| v.as_slice())
                 .unwrap_or(&[])
                 .into_iter(),
         )

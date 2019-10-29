@@ -26,7 +26,7 @@ impl<ONE, MANY> OneToMany<ONE, MANY> {
         ManyIter(
             self.vec
                 .get(id.into())
-                .map(|v| &v[..])
+                .map(|v| v.as_slice())
                 .unwrap_or(&[])
                 .into_iter(),
         )
@@ -86,6 +86,6 @@ where
         self.iter
             .next()
             .filter(|(_, v)| !v.is_empty())
-            .map(|(i, v)| (i.into(), &v[..]))
+            .map(|(i, v)| (i.into(), v.as_slice()))
     }
 }
