@@ -81,5 +81,5 @@ where
 
 #[test]
 fn test_many_to_many_from_iterator() {
-    std::iter::once((1, 3)).collect::<ManyToMany<usize, usize>>();
+    let _ = std::iter::once((1, 3)).collect::<ManyToMany<usize, usize>>();
 }

@@ -251,9 +251,7 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl flock::LoadFromConn for #table {
-            type Future = Box<dyn flock::futures::Future<Item = (flock::mssql_client::Connection, Self), Error = flock::failure::Error>>;
-
-            fn load_from_conn(conn: flock::mssql_client::Connection) -> Self::Future {
+            fn load_from_conn(conn: flock::mssql_client::Connection) -> flock::LoadFromConnFut<Self> {
                 let table = Self {
                     map: Default::default(),
                     tag: Default::default(),
@@ -403,9 +401,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl flock::LoadFromConn for #table {
-            type Future = Box<dyn flock::futures::Future<Item = (flock::mssql_client::Connection, Self), Error = flock::failure::Error>>;
-
-            fn load_from_conn(conn: flock::mssql_client::Connection) -> Self::Future {
+            fn load_from_conn(conn: flock::mssql_client::Connection) -> flock::LoadFromConnFut<Self> {
                 let table = Self {
                     tag: Default::default(),
                     vec: Default::default(),

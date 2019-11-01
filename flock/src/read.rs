@@ -1,4 +1,4 @@
-use crate::{map_error, ConnOrFactory, LoadFromConn};
+use crate::{map_error, ConnOrFactory, LoadFromConn, LoadFromConnFut};
 use failure::Error;
 use futures::{try_ready, Async, Future, Poll};
 use futures_locks::{RwLock, RwLockReadFut, RwLockReadGuard, RwLockWriteFut, RwLockWriteGuard};
@@ -105,7 +105,7 @@ enum State<T: LoadFromConn> {
         Option<RwLockWriteGuard<Option<T>>>,
         Box<dyn Future<Item = Connection, Error = Error>>,
     ),
-    Load(RwLockWriteGuard<Option<T>>, T::Future),
+    Load(RwLockWriteGuard<Option<T>>, LoadFromConnFut<T>),
     Read(RwLockReadFut<Option<T>>),
     Write(RwLockWriteFut<Option<T>>),
 }

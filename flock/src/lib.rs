@@ -32,7 +32,7 @@ pub use entity_id_set::EntityIdSet;
 pub use failure;
 pub use futures;
 pub use iter::FlockIter;
-pub use load_from_conn::LoadFromConn;
+pub use load_from_conn::{LoadFromConn, LoadFromConnFut};
 pub use lock::Lock;
 pub use lock_states::LockStates;
 pub use log;
