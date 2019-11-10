@@ -8,13 +8,13 @@ use futures::future::{ok, Future};
 use futures_locks::{Mutex, RwLockReadGuard};
 use mssql_client::{Parameter, Transaction};
 use std::{
-    borrow::Cow,
-    collections::hash_map::{Values, ValuesMut},
+    collections::hash_map::{Entry, Values, ValuesMut},
     hash::Hash,
     ops::{Deref, DerefMut},
 };
 
 pub trait UpdateDiff {
+    /// Compute and update sql query if any values has changes, otherwise returns None.
     fn update_diff(&self, old: &Self) -> Option<(String, Vec<Parameter<'static>>)>;
 }
 
@@ -40,19 +40,27 @@ impl<K, V> UpgradableIndexTable<K, V> {
         }
     }
 
-    // pub fn get_mut(&mut self, key: K) -> Option<IndexMutGuard<K, V>>
-    // where
-    //     K: Copy + Eq + Hash + Into<usize>,
-    //     V: Clone + PartialEq,
-    // {
-    //     let value = self.get(key)?.clone();
+    pub fn get_mut(&mut self, key: K) -> Option<IndexMut<K, V>>
+    where
+        K: Copy + Eq + Hash + Into<usize>,
+        V: Clone,
+    {
+        let tracker_value = self.tracker.entry(key);
+        let map_value = self.map.get(key);
 
-    //     Some(IndexMutGuard {
-    //         key,
-    //         table: self,
-    //         value: Some(value),
-    //     })
-    // }
+        if let Entry::Vacant(_) = tracker_value {
+            if map_value.is_none() {
+                return None;
+            }
+        }
+
+        Some(IndexMut {
+            local_copy: None,
+            map_value,
+            tracker_value,
+            transaction: &self.transaction,
+        })
+    }
 
     pub fn has_changes(&self) -> bool {
         !self.tracker.is_empty()
@@ -110,65 +118,55 @@ impl<K, V> UpgradableIndexTable<K, V> {
     }
 }
 
-pub struct IndexMutGuard<'a, K, V>
-where
-    V: Clone,
-{
-    key: K,
-    map: &'a IndexMap<K, V>,
-    tracker: &'a mut ChangeTracker<K, V>,
+pub struct IndexMut<'a, K, V> {
+    local_copy: Option<V>,
+    map_value: Option<&'a V>,
+    tracker_value: Entry<'a, K, ChangeState<V>>,
     transaction: &'a Mutex<Option<Transaction>>,
-    value: Cow<'a, V>,
 }
 
-impl<'a, K, V> Deref for IndexMutGuard<'a, K, V>
-where
-    V: Clone,
-{
+impl<'a, K, V> Deref for IndexMut<'a, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
-        &self.value
+        self.local_copy
+            .as_ref()
+            .unwrap_or_else(|| get_old_value(&self.tracker_value, self.map_value))
     }
 }
 
-impl<'a, K, V> DerefMut for IndexMutGuard<'a, K, V>
+impl<'a, K, V> DerefMut for IndexMut<'a, K, V>
 where
     V: Clone,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value.to_mut()
+        let tracker_value = &self.tracker_value;
+        let map_value = self.map_value;
+        self.local_copy
+            .get_or_insert_with(|| get_old_value(tracker_value, map_value).clone())
     }
 }
 
-impl<'a, K, V> IndexMutGuard<'a, K, V>
+impl<'a, K, V> IndexMut<'a, K, V>
 where
     V: Clone + UpdateDiff,
 {
     pub fn execute(self) -> Box<dyn Future<Item = (), Error = Error> + 'a>
     where
         K: Copy + Eq + Hash + Into<usize>,
+        V: PartialEq,
     {
-        // changes appears only on owned value, borrowed value are read only.
-        let value = match self.value {
-            Cow::Owned(v) => v,
-            Cow::Borrowed(_) => return Box::new(ok::<_, Error>(())),
+        // changes appears only if there is a local copy
+        let new = match self.local_copy {
+            Some(v) => v,
+            None => return Box::new(ok::<_, Error>(())),
         };
 
-        let key = self.key;
-        let tracker = self.tracker;
+        let map_value = self.map_value;
+        let tracker_value = self.tracker_value;
+        let old = get_old_value(&tracker_value, map_value);
 
-        // check if the owned value as change or the value is still the same as it was.
-        let update_statement = match tracker.get(&key) {
-            Some(ChangeState::Inserted(v)) | Some(ChangeState::Updated(v)) => value.update_diff(v),
-            Some(ChangeState::Removed) => unreachable!("IndexMutGuard - removed"),
-            None => match self.map.get(key) {
-                Some(v) => value.update_diff(v),
-                None => unreachable!("IndexMutGuard - not found"),
-            },
-        };
-
-        let (sql, params) = match update_statement {
+        let (sql, params) = match new.update_diff(old) {
             Some(u) => u,
             None => return Box::new(ok::<_, Error>(())),
         };
@@ -184,17 +182,43 @@ where
                         .map(move |transaction| {
                             *lock = Some(transaction);
 
-                            if let Some(ChangeState::Inserted(v)) | Some(ChangeState::Updated(v)) =
-                                tracker.get_mut(&key)
-                            {
-                                *v = value;
-                                return;
+                            match tracker_value {
+                                Entry::Occupied(mut o) => match o.get_mut() {
+                                    ChangeState::Inserted(v) => {
+                                        *v = new;
+                                    }
+                                    ChangeState::Updated(_) => {
+                                        if map_value.expect("map_value") == &new {
+                                            o.remove();
+                                        } else {
+                                            *o.get_mut() = ChangeState::Updated(new);
+                                        }
+                                    }
+                                    ChangeState::Removed => unreachable!("Removed"),
+                                },
+                                Entry::Vacant(v) => {
+                                    v.insert(ChangeState::Updated(new));
+                                }
                             }
-
-                            tracker.insert(key, ChangeState::Updated(value));
                         })
                 }),
         )
+    }
+}
+
+fn get_old_value<'a, K, V>(
+    tracker_value: &'a Entry<'a, K, ChangeState<V>>,
+    map_value: Option<&'a V>,
+) -> &'a V {
+    match tracker_value {
+        Entry::Occupied(o) => match o.get() {
+            ChangeState::Inserted(v) | ChangeState::Updated(v) => v,
+            ChangeState::Removed => unreachable!("change_tracker_removed"),
+        },
+        Entry::Vacant(_) => match map_value {
+            Some(v) => v,
+            None => unreachable!("map_value not found"),
+        },
     }
 }
 

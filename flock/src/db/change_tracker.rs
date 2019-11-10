@@ -1,6 +1,6 @@
 use super::change_state::ChangeState;
 use std::{
-    collections::hash_map::{HashMap, Values, ValuesMut},
+    collections::hash_map::{Entry, HashMap, Values, ValuesMut},
     hash::Hash,
 };
 
@@ -17,6 +17,13 @@ impl<K, V> ChangeTracker<K, V> {
         self.inserted_len = 0;
         self.removed_len = 0;
         self.updated_len = 0;
+    }
+
+    pub fn entry(&mut self, key: K) -> Entry<K, ChangeState<V>>
+    where
+        K: Eq + Hash,
+    {
+        self.map.entry(key)
     }
 
     pub fn is_empty(&self) -> bool {
