@@ -4,6 +4,7 @@ mod as_lock;
 mod as_mut_opt;
 mod as_mut_opt_wrapper;
 mod conn_or_factory;
+mod db;
 mod entity_by;
 mod entity_id_set;
 pub mod iter;
