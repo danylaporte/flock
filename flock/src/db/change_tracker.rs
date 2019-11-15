@@ -1,6 +1,6 @@
 use super::change_state::ChangeState;
 use std::{
-    collections::hash_map::{Entry, HashMap, Values, ValuesMut},
+    collections::hash_map::{Entry, HashMap, Iter, Values, ValuesMut},
     hash::Hash,
 };
 
@@ -42,6 +42,10 @@ impl<K, V> ChangeTracker<K, V> {
         K: Eq + Hash,
     {
         self.map.get_mut(key)
+    }
+
+    pub fn iter(&self) -> Iter<K, ChangeState<V>> {
+        self.map.iter()
     }
 
     pub fn insert(&mut self, key: K, value: ChangeState<V>) -> Option<ChangeState<V>>

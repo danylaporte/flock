@@ -1,6 +1,5 @@
 use super::{
     change_state::ChangeState,
-    change_tracker::ChangeTracker,
     index_map::{IndexMap, Iter as IndexMapIter},
 };
 use failure::{format_err, Error};
@@ -11,32 +10,33 @@ use std::{
     collections::hash_map::{Entry, Values, ValuesMut},
     hash::Hash,
     ops::{Deref, DerefMut},
+    vec::IntoIter,
 };
 
-pub trait UpdateDiff {
+pub trait InsertSql {
+    fn insert_sql(&self) -> (String, Vec<Parameter<'static>>);
+}
+
+pub trait UpdateSqlDiff {
     /// Compute and update sql query if any values has changes, otherwise returns None.
-    fn update_diff(&self, old: &Self) -> Option<(String, Vec<Parameter<'static>>)>;
+    fn update_sql_diff(&self, old: &Self) -> Option<(String, Vec<Parameter<'static>>)>;
 }
 
 pub struct UpgradableIndexTable<K, V> {
+    changes: IndexMap<K, ChangeState<V>>,
     map: RwLockReadGuard<IndexMap<K, V>>,
-    tracker: ChangeTracker<K, V>,
     transaction: Mutex<Option<Transaction>>,
 }
 
 impl<K, V> UpgradableIndexTable<K, V> {
-    pub fn cancel_changes(&mut self) {
-        self.tracker.clear();
-    }
-
     pub fn get(&self, key: K) -> Option<&V>
     where
-        K: Eq + Hash + Into<usize>,
+        K: Copy + Into<usize>,
     {
-        match self.tracker.get(&key) {
-            Some(ChangeState::Inserted(v)) | Some(ChangeState::Updated(v)) => Some(v),
-            Some(ChangeState::Removed) => None,
-            None => self.map.get(key),
+        match self.changes.get(key) {
+            Some(ChangeState::Inserted(v)) | Some(ChangeState::Updated(v)) => Some(*v),
+            Some(ChangeState::Removed) | None => None,
+            Some(ChangeState::Unchanged) => self.map.get(key),
         }
     }
 
@@ -45,59 +45,120 @@ impl<K, V> UpgradableIndexTable<K, V> {
         K: Copy + Eq + Hash + Into<usize>,
         V: Clone,
     {
-        let tracker_value = self.tracker.entry(key);
-        let map_value = self.map.get(key);
-
-        if let Entry::Vacant(_) = tracker_value {
-            if map_value.is_none() {
-                return None;
-            }
+        match self.tracker.get(&key) {
+            Some(ChangeState::Inserted(_)) | Some(ChangeState::Updated(_)) => {}
+            Some(ChangeState::Removed) => return None,
+            None => match self.map.get(key) {
+                Some(_) => {}
+                None => return None,
+            },
         }
 
         Some(IndexMut {
+            key,
             local_copy: None,
-            map_value,
-            tracker_value,
+            map: &self.map,
+            tracker: &mut self.tracker,
             transaction: &self.transaction,
         })
     }
 
     pub fn has_changes(&self) -> bool {
-        !self.tracker.is_empty()
+        self.tracker.iter().any(|(_, v)| match v {
+            ChangeState::Removed | ChangeState::Updated(_) => true,
+            ChangeState::Unchanged => false,
+        })
     }
 
-    pub fn insert(&mut self, key: K, value: V)
+    pub fn insert<'a>(
+        &'a mut self,
+        key: K,
+        value: V,
+    ) -> Box<dyn Future<Item = (), Error = Error> + 'a>
     where
-        K: Copy + Eq + Hash + Into<usize>,
-        V: PartialEq,
+        K: Copy + Into<usize>,
+        V: InsertSql + UpdateSqlDiff,
     {
-        match self.map.get(key) {
-            Some(row) if row == &value => {
-                self.tracker.remove(&key);
+        let (sql, params) = match self.changes.get(key) {
+            Some(ChangeState::Removed) | None => value.insert_sql(),
+            Some(ChangeState::Unchanged) => {
+                match value.update_sql_diff(self.map.get(key).expect("map")) {
+                    Some(v) => v,
+                    None => return,
+                }
             }
-            Some(row) => {
-                self.tracker.insert(key, ChangeState::Updated(value));
-            }
-            None => {
-                self.tracker.insert(key, ChangeState::Inserted(value));
-            }
-        }
+            Some(ChangeState::Updated(old)) => match value.update_sql_diff(old) {
+                Some(v) => v,
+                None => return,
+            },
+        };
+
+        self.transaction
+            .lock()
+            .map_err(lock_error)
+            .and_then(|mut lock| {
+                lock.take()
+                    .expect("transaction")
+                    .exec(sql, params)
+                    .map(move |transaction| {
+                        *lock = Some(transaction);
+
+                        self.changes.insert(key, match self.map.get(key) {
+                            Some(v) if v == &value => ChangeState::Unchanged,
+                            _ => ChangeState::Updated(value),
+                        });
+
+                        ()
+                    })
+            })
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() > 0
     }
 
-    pub fn iter(&self) -> Iter<K, V>
-    where
-        K: Eq + From<usize> + Hash,
-    {
-        Iter {
-            index_map_iter: self.map.iter(),
-            tracker: &self.tracker,
-            tracker_iter: self.tracker.values(),
-        }
-    }
+    // pub fn iter(&self) -> Iter<K, V>
+    // where
+    //     K: Eq + From<usize> + Hash,
+    // {
+    //     Iter {
+    //         index_map_iter: self.map.iter(),
+    //         tracker: &self.tracker,
+    //         tracker_iter: self.tracker.values(),
+    //     }
+    // }
+
+    // pub fn iter_mut(&mut self) -> IterMut<K, V>
+    // where
+    //     K: Copy + Eq + From<usize> + Hash,
+    // {
+    //     let it = self
+    //         .map
+    //         .iter()
+    //         .map(|(k, _)| k)
+    //         .filter(|k| match self.tracker.get(k) {
+    //             Some(ChangeState::Updated(_)) | None => true,
+    //             _ => false,
+    //         })
+    //         .chain(
+    //             self.tracker
+    //                 .iter()
+    //                 .filter(|(k, v)| match v {
+    //                     ChangeState::Inserted(_) => true,
+    //                     _ => false,
+    //                 })
+    //                 .map(|(k, _)| *k),
+    //         )
+    //         .collect::<Vec<_>>()
+    //         .into_iter();
+
+    //     IterMut {
+    //         it,
+    //         map: &self.map,
+    //         tracker: &mut self.tracker,
+    //         transaction: &self.transaction,
+    //     }
+    // }
 
     pub fn len(&self) -> usize {
         self.map.len() - self.tracker.removed_len() + self.tracker.inserted_len()
@@ -119,31 +180,37 @@ impl<K, V> UpgradableIndexTable<K, V> {
 }
 
 pub struct IndexMut<'a, K, V> {
+    key: K,
     local_copy: Option<V>,
-    map_value: Option<&'a V>,
-    tracker_value: Entry<'a, K, ChangeState<V>>,
+    map: &'a IndexMap<K, V>,
+    tracker: &'a mut ChangeTracker<K, V>,
     transaction: &'a Mutex<Option<Transaction>>,
 }
 
-impl<'a, K, V> Deref for IndexMut<'a, K, V> {
+impl<'a, K, V> Deref for IndexMut<'a, K, V>
+where
+    K: Copy + Eq + Hash + Into<usize>,
+{
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
         self.local_copy
             .as_ref()
-            .unwrap_or_else(|| get_old_value(&self.tracker_value, self.map_value))
+            .unwrap_or_else(|| get_old_value(self.key, self.map, self.tracker))
     }
 }
 
 impl<'a, K, V> DerefMut for IndexMut<'a, K, V>
 where
+    K: Copy + Eq + Hash + Into<usize>,
     V: Clone,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        let tracker_value = &self.tracker_value;
-        let map_value = self.map_value;
+        let key = self.key;
+        let map = self.map;
+        let tracker = &self.tracker;
         self.local_copy
-            .get_or_insert_with(|| get_old_value(tracker_value, map_value).clone())
+            .get_or_insert_with(|| get_old_value(key, map, tracker).clone())
     }
 }
 
@@ -162,9 +229,10 @@ where
             None => return Box::new(ok::<_, Error>(())),
         };
 
-        let map_value = self.map_value;
-        let tracker_value = self.tracker_value;
-        let old = get_old_value(&tracker_value, map_value);
+        let key = self.key;
+        let map = self.map;
+        let tracker = self.tracker;
+        let old = get_old_value(key, map, tracker);
 
         let (sql, params) = match new.update_diff(old) {
             Some(u) => u,
@@ -182,13 +250,13 @@ where
                         .map(move |transaction| {
                             *lock = Some(transaction);
 
-                            match tracker_value {
+                            match tracker.entry(key) {
                                 Entry::Occupied(mut o) => match o.get_mut() {
                                     ChangeState::Inserted(v) => {
                                         *v = new;
                                     }
                                     ChangeState::Updated(_) => {
-                                        if map_value.expect("map_value") == &new {
+                                        if map.get(key).expect("map_value") == &new {
                                             o.remove();
                                         } else {
                                             *o.get_mut() = ChangeState::Updated(new);
@@ -206,18 +274,24 @@ where
     }
 }
 
+fn lock_error<T>(_: T) -> Error {
+    unreachable!()
+}
+
 fn get_old_value<'a, K, V>(
-    tracker_value: &'a Entry<'a, K, ChangeState<V>>,
-    map_value: Option<&'a V>,
-) -> &'a V {
-    match tracker_value {
-        Entry::Occupied(o) => match o.get() {
-            ChangeState::Inserted(v) | ChangeState::Updated(v) => v,
-            ChangeState::Removed => unreachable!("change_tracker_removed"),
-        },
-        Entry::Vacant(_) => match map_value {
+    key: K,
+    map: &'a IndexMap<K, V>,
+    tracker: &'a ChangeTracker<K, V>,
+) -> &'a V
+where
+    K: Eq + Hash + Into<usize>,
+{
+    match tracker.get(&key) {
+        Some(ChangeState::Inserted(v)) | Some(ChangeState::Updated(v)) => v,
+        Some(ChangeState::Removed) => unreachable!("tracker removed"),
+        None => match map.get(key) {
             Some(v) => v,
-            None => unreachable!("map_value not found"),
+            None => unreachable!("map not found"),
         },
     }
 }
@@ -254,58 +328,29 @@ where
     }
 }
 
-// pub struct IterMut<'a, K, V> {
-//     state: State<'a, K, V>,
-// }
+pub struct IterMut<'a, K, V> {
+    it: IntoIter<K>,
+    map: &'a IndexMap<K, V>,
+    tracker: &'a mut ChangeTracker<K, V>,
+    transaction: &'a Mutex<Option<Transaction>>,
+}
 
-// enum State<'a, K, V> {
-//     MapIter(IndexMapIter<'a, K, V>, &'a mut ChangeTracker<K, V>),
-//     TrackerIter(TrackerIter<'a, K, V>),
-//     Done,
-// }
+impl<'a, K, V> Iterator for IterMut<'a, K, V>
+where
+    K: Eq + Hash + Into<usize> + 'a,
+    V: 'a,
+{
+    type Item = IndexMut<'a, K, V>;
 
-// impl<'a, K, V> Iterator for IterMut<'a, K, V>
-// where
-//     K: Eq + From<usize> + Hash,
-//     V: Clone,
-// {
-//     type Item = &'a mut V;
+    fn next(&mut self) -> Option<Self::Item> {
+        let key = self.it.next()?;
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         match &mut self.state {
-//             State::MapIter(iter, tracker, current) => {
-//                 while let Some((k, value)) = self.iter.next() {
-//                     return match self.tracker.get(&k) {
-//                         Some(ChangeState::Inserted(v)) => unreachable!("Insert in both table and tracker"),
-//                         Some(ChangeState::Updated(v)) => Some(v),
-//                         Some(ChangeState::Removed) => continue,
-//                         None => {
-//                             self.value = Some(value.clone());
-//                             return self.value.as_mut();
-//                         }
-//                     };
-//                 }
-//             }
-//         }
-
-//         while let Some((k, value)) = self.index_map_iter.next() {
-//             return match self.tracker.get(&k) {
-//                 Some(ChangeState::Inserted(v)) => unreachable!("Insert in both table and tracker"),
-//                 Some(ChangeState::Updated(v)) => Some(v),
-//                 Some(ChangeState::Removed) => continue,
-//                 None => {
-//                     self.value = Some(value.clone());
-//                     return self.value.as_mut();
-//                 }
-//             };
-//         }
-
-//         while let Some((k, v)) = self.tracker_iter.next() {
-//             if let ChangeState::Inserted(v) = v {
-//                 return Some(v);
-//             }
-//         }
-
-//         None
-//     }
-// }
+        Some(IndexMut {
+            key,
+            local_copy: None,
+            map: self.map,
+            tracker: self.tracker as _,
+            transaction: self.transaction,
+        })
+    }
+}
