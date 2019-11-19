@@ -1,8 +1,18 @@
+use failure::Error;
 use mssql_client::{Connection, ConnectionFactory};
 
 pub enum ConnOrFactory {
     Connection(Connection),
     Factory(ConnectionFactory),
+}
+
+impl ConnOrFactory {
+    pub async fn connect(self) -> Result<Connection, Error> {
+        match self {
+            ConnOrFactory::Connection(conn) => Ok(conn),
+            ConnOrFactory::Factory(fact) => fact.create_connection().await,
+        }
+    }
 }
 
 impl From<Connection> for ConnOrFactory {

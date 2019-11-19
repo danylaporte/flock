@@ -110,13 +110,13 @@ fn relation(f: &TraitItemMethod) -> RelationData {
         relation: quote! {
             static #static_ident: flock::version_cache::VersionCache<#relation_ty> = flock::version_cache::VersionCache::new();
 
-            pub struct #relation(flock::version_cache::ArcData<#relation_ty>);
+            pub struct #relation(flock::version_cache::CacheData<#relation_ty>);
 
             impl std::ops::Deref for #relation {
                 type Target = #relation_ty;
 
                 fn deref(&self) -> &Self::Target {
-                    &(self.0).0
+                    &*self.0
                 }
             }
 
@@ -131,7 +131,7 @@ fn relation(f: &TraitItemMethod) -> RelationData {
                 #extra_methods
 
                 pub fn tag(&self) -> flock::version_tag::VersionTag {
-                    (self.0).1
+                    (self.0).tag()
                 }
             }
         },
@@ -157,11 +157,11 @@ fn relation_methods(ty: &Type) -> TokenStream {
 
         quote! {
             pub fn #left_ids_by(&self, id: #right) -> flock::iter::ManyIter<#left> {
-                (self.0).0.iter_left_by(id)
+                (self.0).iter_left_by(id)
             }
 
             pub fn #right_ids_by(&self, id: #left) -> flock::iter::ManyIter<#right> {
-                (self.0).0.iter_right_by(id)
+                (self.0).iter_right_by(id)
             }
         }
     } else if let Some((one, many)) = extract_2_generics_ty(ty, "OneToMany") {
@@ -175,7 +175,7 @@ fn relation_methods(ty: &Type) -> TokenStream {
 
         quote! {
             pub fn #many_ids_by(&self, id: #one) -> flock::iter::ManyIter<#many> {
-                (self.0).0.iter_by(id)
+                (self.0).iter_by(id)
             }
         }
     } else {

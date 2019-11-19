@@ -1,13 +1,11 @@
-use crate::{map_error, AsMutOpt, SetTag};
-use failure::Error;
-use futures::{try_ready, Async, Future, Poll};
-use futures_locks::{RwLockWriteFut, RwLockWriteGuard};
+use crate::{AsMutOpt, SetTag};
+use async_std::sync::RwLockWriteGuard;
 use std::ops::{Deref, DerefMut};
 use version_tag::VersionTag;
 
-pub struct WriteOptGuard<T: SetTag> {
+pub struct WriteOptGuard<T: SetTag + 'static> {
     cancel_tag: bool,
-    guard: RwLockWriteGuard<Option<T>>,
+    guard: RwLockWriteGuard<'static, Option<T>>,
     new_tag: VersionTag,
 }
 
@@ -30,6 +28,13 @@ impl<T: SetTag> AsRef<Option<T>> for WriteOptGuard<T> {
 }
 
 impl<T: SetTag> WriteOptGuard<T> {
+    pub(crate) fn new(guard: RwLockWriteGuard<'static, Option<T>>) -> Self {
+        Self {
+            cancel_tag: false,
+            guard,
+            new_tag: VersionTag::new(),
+        }
+    }
     /// Prevent the new_tag value to be placed on the locked value.
     ///
     /// Use this method when there is no changes occurred.
@@ -59,36 +64,12 @@ impl<T: SetTag> DerefMut for WriteOptGuard<T> {
     }
 }
 
-impl<T: SetTag> Drop for WriteOptGuard<T> {
+impl<T: SetTag + 'static> Drop for WriteOptGuard<T> {
     fn drop(&mut self) {
         if !self.cancel_tag {
             if let Some(g) = &mut *self.guard {
                 g.set_tag(self.new_tag);
             }
         }
-    }
-}
-
-pub struct WriteOptFut<T>(pub(crate) RwLockWriteFut<Option<T>>);
-
-impl<T: SetTag> WriteOptFut<T> {
-    pub(crate) fn load(f: RwLockWriteFut<Option<T>>) -> Self {
-        Self(f)
-    }
-}
-
-impl<T: SetTag> Future for WriteOptFut<T> {
-    type Item = WriteOptGuard<T>;
-    type Error = Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let guard = try_ready!(self.0.poll().map_err(map_error));
-        let guard = WriteOptGuard {
-            cancel_tag: false,
-            guard,
-            new_tag: VersionTag::new(),
-        };
-
-        Ok(Async::Ready(guard))
     }
 }

@@ -1,19 +1,21 @@
 use crate::{
-    mssql_client::Connection, tokio::executor::current_thread::block_on_all, LoadFromConn,
+    mssql_client::{Connection, ConnectionFactory},
+    ConnOrFactory, LoadFromSql,
 };
 
 type IsKey = bool;
 type IsNull = Option<bool>;
 
 /// use in flock_derive::Entity macro to test the loading of a table.
-pub fn test_load<T: LoadFromConn>() {
-    let conn = block_on_all(Connection::from_env("DB")).expect("Connection");
-    block_on_all(T::load_from_conn(conn)).unwrap();
+pub async fn test_load<T: LoadFromSql>() {
+    let conn =
+        ConnOrFactory::Factory(ConnectionFactory::from_env("DB").expect("Environment variable DB"));
+    T::load_from_sql(conn).await.expect("load fail");
 }
 
 /// use in flock_derive::Entity macro to test the schema of a table.
-pub fn test_schema(table: &str, fields: &[(&str, &dyn Fn(&str) -> bool, IsNull, IsKey)]) {
-    let conn = block_on_all(Connection::from_env("DB")).expect("Connection");
+pub async fn test_schema(table: &str, fields: &[(&str, &dyn Fn(&str) -> bool, IsNull, IsKey)]) {
+    let conn = Connection::from_env("DB").await.expect("Connection");
 
     const SQL: &str = r#"SELECT
         c.COLUMN_NAME,
@@ -41,7 +43,7 @@ pub fn test_schema(table: &str, fields: &[(&str, &dyn Fn(&str) -> bool, IsNull, 
     "#;
 
     let mut rows: Vec<(String, String, bool, bool)> =
-        block_on_all(conn.query(SQL, table)).expect("Query").1;
+        conn.query(SQL, table).await.expect("Query").1;
 
     // make all field name lowercase for comparison
     rows.iter_mut().for_each(|r| r.0 = r.0.to_lowercase());

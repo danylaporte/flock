@@ -25,6 +25,11 @@ pub trait FieldExt {
         self.field().attrs.iter().any(|a| a.path.is_ident("key"))
     }
 
+    fn is_string(&self) -> bool {
+        let ty = &self.field().ty;
+        quote!(#ty).to_string() == "String"
+    }
+
     fn is_translated(&self) -> bool {
         let t = self.ty();
         let t = quote! { #t }.to_string();

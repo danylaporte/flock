@@ -17,23 +17,30 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let as_refs = impl_as_refs(&args);
     let locks = impl_struct(&args);
     let locks_fut = locks_fut(&args);
-    let dir = LitStr::new(
-        &format!("{}", config_dir().display()),
-        args.fields
-            .iter()
-            .map(|f| f.member.span())
-            .next()
-            .expect("field"),
-    );
+
+    let dir = config_dir();
+
+    let dir = if let Some(dir) = dir {
+        let dir = LitStr::new(
+            &format!("{}", dir.display()),
+            args.fields
+                .iter()
+                .map(|f| f.member.span())
+                .next()
+                .expect("field"),
+        );
+
+        quote! { include_str!(#dir); }
+    } else {
+        quote! {}
+    };
 
     quote!({
         use flock::{
-            futures::{Async, Future, Poll},
-            AsMutOpt, ConnOrFactory, LockStates, ReadFut, ReadGuard, ReadOptFut, ReadOptGuard,
-            WriteFut, WriteGuard, WriteOptFut, WriteOptGuard,
+            AsMutOpt, ConnOrFactory, ReadGuard, ReadOptGuard, WriteGuard, WriteOptGuard,
         };
 
-        include_str!(#dir);
+        #dir
 
         #locks
         #as_muts
@@ -43,18 +50,26 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     .into()
 }
 
-fn config_dir() -> PathBuf {
+fn config_dir() -> Option<PathBuf> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR")
         .replace("\\", "/");
 
     let mut p = PathBuf::from(manifest_dir);
     p.set_file_name("lock_derive.toml");
-    p
+
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
 }
 
 fn load_config() -> Config {
-    let p = config_dir();
+    let p = match config_dir() {
+        Some(p) => p,
+        None => return Config::new(),
+    };
 
     let s = std::fs::read_to_string(&p).unwrap_or_else(|e| {
         panic!("Failed to open `{}`; {}", p.display(), e);
@@ -186,75 +201,41 @@ struct Field {
 }
 
 fn locks_fut(args: &Args) -> TokenStream {
-    let declare_fields = args.fields.iter().map(|f| {
+    let resolve_guards = args.fields.iter().map(|f| {
         let t = &f.ty;
         let n = &f.member;
 
         match f.access {
-            Access::Read => quote! { #n: LockStates<ReadFut<#t>, ReadGuard<#t>> },
-            Access::ReadOpt => quote! { #n: LockStates<ReadOptFut<#t>, ReadOptGuard<#t>> },
-            Access::Write => quote! { #n: LockStates<WriteFut<#t>, WriteGuard<#t>> },
-            Access::WriteOpt => quote! { #n: LockStates<WriteOptFut<#t>, WriteOptGuard<#t>> },
-        }
-    });
-
-    let impl_future = impl_future_for_locks_fut(args);
-    let init_locks_fut = init_locks_fut(args);
-
-    quote! {
-        struct LocksFut {
-            conn: Option<ConnOrFactory>,
-            #(#declare_fields,)*
-        }
-
-        #impl_future
-
-        #init_locks_fut
-    }
-}
-
-fn impl_future_for_locks_fut(args: &Args) -> TokenStream {
-    let fields = args.fields.iter().map(|f| {
-        let n = &f.member;
-        quote! { #n: self.#n.take() }
-    });
-
-    let mut code = Some(quote! { return Ok(Async::Ready(Locks { #(#fields,)* })); });
-
-    for f in &args.fields {
-        let n = &f.member;
-        let c = code.take().expect("code");
-
-        code = Some(quote! { if self.#n.poll(&mut self.conn)? { #c } });
-    }
-
-    let c = code.take().expect("code");
-
-    quote! {
-        impl Future for LocksFut {
-            type Item = Locks;
-            type Error = flock::failure::Error;
-
-            fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-                #c
-
-                Ok(Async::NotReady)
+            Access::Read => {
+                quote! { let (conn, #n) = <#t as flock::AsLock>::as_lock().read(conn).await?; }
+            }
+            Access::ReadOpt => {
+                quote! { let #n = <#t as flock::AsLock>::as_lock().read_opt().await; }
+            }
+            Access::Write => {
+                quote! { let (conn, #n) = <#t as flock::AsLock>::as_lock().write(conn).await?; }
+            }
+            Access::WriteOpt => {
+                quote! { let #n = <#t as flock::AsLock>::as_lock().write_opt().await; }
             }
         }
-    }
-}
+    });
 
-fn init_locks_fut(args: &Args) -> TokenStream {
     let fields = args.fields.iter().map(|f| {
         let n = &f.member;
-        quote! { #n: LockStates::None }
+        quote! { #n: #n }
     });
 
     quote! {
-        LocksFut {
-            conn: Some(ConnOrFactory::Factory(flock::mssql_client::ConnectionFactory::from_env("DB").expect("ConnectionFactory"))),
-            #(#fields,)*
-        }
+        Box::pin(async {
+            let conn = flock::ConnOrFactory::Factory(flock::mssql_client::ConnectionFactory::from_env("DB")?);
+
+            #(#resolve_guards)*
+
+            std::result::Result::<_, flock::failure::Error>::Ok(Locks {
+                #(#fields,)*
+            })
+        })
     }
 }
 
