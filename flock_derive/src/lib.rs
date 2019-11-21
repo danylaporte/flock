@@ -7,7 +7,6 @@ mod entity;
 mod entity_id;
 mod lock_derive;
 mod relations;
-mod table_derive;
 
 /// Turn a struct into an entity, implementing the load from the db and
 /// creating a table for storing it.
@@ -97,9 +96,4 @@ pub fn locks(item: TokenStream) -> TokenStream {
 pub fn relations(_args: TokenStream, input: TokenStream) -> TokenStream {
     let f = parse_macro_input!(input as ItemTrait);
     relations::generate(f).into()
-}
-
-#[proc_macro_derive(Table)]
-pub fn table(input: TokenStream) -> TokenStream {
-    table_derive::derive(input)
 }

@@ -35,11 +35,7 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
         quote! {}
     };
 
-    quote!({
-        use flock::{
-            AsMutOpt, ConnOrFactory, ReadGuard, ReadOptGuard, WriteGuard, WriteOptGuard,
-        };
-
+    quote!(async {
         #dir
 
         #locks
@@ -227,14 +223,12 @@ fn locks_fut(args: &Args) -> TokenStream {
     });
 
     quote! {
-        Box::pin(async {
-            let conn = flock::ConnOrFactory::Factory(flock::mssql_client::ConnectionFactory::from_env("DB")?);
+        let conn = flock::ConnOrFactory::from_env("DB")?;
 
-            #(#resolve_guards)*
+        #(#resolve_guards)*
 
-            std::result::Result::<_, flock::failure::Error>::Ok(Locks {
-                #(#fields,)*
-            })
+        std::result::Result::<_, flock::failure::Error>::Ok(Locks {
+            #(#fields,)*
         })
     }
 }
@@ -245,10 +239,10 @@ fn impl_struct(args: &Args) -> TokenStream {
         let n = &f.member;
 
         match f.access {
-            Access::Read => quote! { #n: ReadGuard<#t> },
-            Access::ReadOpt => quote! { #n: ReadOptGuard<#t> },
-            Access::Write => quote! { #n: WriteGuard<#t> },
-            Access::WriteOpt => quote! { #n: WriteOptGuard<#t> },
+            Access::Read => quote! { #n: flock::ReadGuard<#t> },
+            Access::ReadOpt => quote! { #n: flock::ReadOptGuard<#t> },
+            Access::Write => quote! { #n: flock::WriteGuard<#t> },
+            Access::WriteOpt => quote! { #n: flock::WriteOptGuard<#t> },
         }
     });
 
@@ -273,7 +267,7 @@ fn impl_as_muts(args: &Args) -> TokenStream {
                     }
                 }
 
-                impl AsMutOpt<#t> for Locks {
+                impl flock::AsMutOpt<#t> for Locks {
                     fn as_mut_opt(&mut self) -> Option<&mut #t> {
                         self.#n.as_mut_opt()
                     }
@@ -286,7 +280,7 @@ fn impl_as_muts(args: &Args) -> TokenStream {
                     }
                 }
 
-                impl AsMutOpt<#t> for Locks {
+                impl flock::AsMutOpt<#t> for Locks {
                     fn as_mut_opt(&mut self) -> Option<&mut #t> {
                         self.#n.as_mut_opt()
                     }

@@ -1,5 +1,5 @@
 use crate::{
-    mssql_client::{Connection, ConnectionFactory},
+    mssql_client::Connection,
     ConnOrFactory, LoadFromSql,
 };
 
@@ -8,8 +8,7 @@ type IsNull = Option<bool>;
 
 /// use in flock_derive::Entity macro to test the loading of a table.
 pub async fn test_load<T: LoadFromSql>() {
-    let conn =
-        ConnOrFactory::Factory(ConnectionFactory::from_env("DB").expect("Environment variable DB"));
+    let conn = ConnOrFactory::from_env("DB").expect("Environment variable DB");
     T::load_from_sql(conn).await.expect("load fail");
 }
 

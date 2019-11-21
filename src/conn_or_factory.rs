@@ -13,6 +13,10 @@ impl ConnOrFactory {
             ConnOrFactory::Factory(fact) => fact.create_connection().await,
         }
     }
+
+    pub fn from_env(s: &str) -> Result<ConnOrFactory, Error> {
+        Ok(ConnOrFactory::Factory(ConnectionFactory::from_env(s)?))
+    }
 }
 
 impl From<Connection> for ConnOrFactory {
