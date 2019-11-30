@@ -1,6 +1,6 @@
 [package]
 name = "flock"
-version = "0.6.2"
+version = "0.6.3"
 authors = ["Dany Laporte <dany_laporte@hotmail.com>"]
 edition = "2018"
 
@@ -19,7 +19,7 @@ parking_lot = "0.10"
 rayon = "1.2"
 serde = "1.0"
 thread_local = "1.0"
-tokio = { version = "0.2", features = ["macros", "rt-core"] }
+tokio = { version = "0.2", features = ["macros", "rt-core", "rt-util"] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
 version_tag = { git = "https://github.com/danylaporte/version_tag.git" }
 
