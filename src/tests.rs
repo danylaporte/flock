@@ -1,7 +1,4 @@
-use crate::{
-    mssql_client::Connection,
-    ConnOrFactory, LoadFromSql,
-};
+use crate::{mssql_client::Connection, ConnOrFactory, LoadFromSql};
 
 type IsKey = bool;
 type IsNull = Option<bool>;
