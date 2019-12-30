@@ -33,8 +33,11 @@ impl<T> VecOpt<T> {
         self.len == 0
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.vec.iter().filter_map(|i| i.as_ref())
+    pub fn iter(&self) -> Iter<T> {
+        Iter {
+            iter: self.vec.iter(),
+            len: self.len,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -59,6 +62,32 @@ impl<T> Default for VecOpt<T> {
             len: 0,
             vec: Vec::new(),
         }
+    }
+}
+
+pub struct Iter<'a, T> {
+    iter: std::slice::Iter<'a, Option<T>>,
+    len: usize,
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(item) = self.iter.next() {
+            if let Some(item) = item.as_ref() {
+                return Some(item);
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+
+    fn count(self) -> usize {
+        self.len
     }
 }
 

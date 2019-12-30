@@ -67,12 +67,16 @@ fn relation(f: &TraitItemMethod) -> RelationData {
 
     let wheres = quote! { #(#wheres)* };
 
-    let as_refs = args
-        .iter()
-        .filter_map(|a| a.ident_and_ty().ok())
-        .map(|(i, t)| quote! { let #i: &#t = locks.as_ref(); });
+    let as_refs = args.iter().map(|_| quote! { locks.as_ref(), });
 
     let as_refs = quote! { #(#as_refs)* };
+
+    let as_ref_params = args
+        .iter()
+        .filter_map(|a| a.ident_and_ty().ok())
+        .map(|(i, t)| quote! { #i: &#t, });
+
+    let as_ref_params = quote! { #(#as_ref_params)* };
 
     let tags = args
         .iter()
@@ -115,21 +119,27 @@ fn relation(f: &TraitItemMethod) -> RelationData {
             impl std::ops::Deref for #relation {
                 type Target = #relation_ty;
 
+                #[inline]
                 fn deref(&self) -> &Self::Target {
                     &*self.0
                 }
             }
 
             impl<L> From<L> for #relation where L: #wheres {
+                #[inline]
                 fn from(locks: L) -> Self {
-                    #as_refs
-                    Self(#static_ident.get_or_init(|| #body, &[#tags]))
+                    Self::new(#as_refs)
                 }
             }
 
             impl #relation {
                 #extra_methods
 
+                pub fn new(#as_ref_params) -> Self {
+                    Self(#static_ident.get_or_init(|| #body, &[#tags]))
+                }
+
+                #[inline]
                 pub fn tag(&self) -> flock::version_tag::VersionTag {
                     (self.0).tag()
                 }
@@ -156,10 +166,12 @@ fn relation_methods(ty: &Type) -> TokenStream {
         );
 
         quote! {
+            #[inline]
             pub fn #left_ids_by(&self, id: #right) -> flock::iter::ManyIter<#left> {
                 (self.0).iter_left_by(id)
             }
 
+            #[inline]
             pub fn #right_ids_by(&self, id: #left) -> flock::iter::ManyIter<#right> {
                 (self.0).iter_right_by(id)
             }
@@ -174,6 +186,7 @@ fn relation_methods(ty: &Type) -> TokenStream {
         );
 
         quote! {
+            #[inline]
             pub fn #many_ids_by(&self, id: #one) -> flock::iter::ManyIter<#many> {
                 (self.0).iter_by(id)
             }

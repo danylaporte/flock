@@ -11,8 +11,27 @@ use syn::{bracketed, parse_macro_input, parse_str, Error, Ident, LitStr, Token, 
 
 type Config = HashMap<String, Vec<Type>>;
 
-pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn locks(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let args = parse_macro_input!(item as Args);
+    let t = derive(args);
+    quote!({
+        #t
+        future
+    })
+    .into()
+}
+
+pub fn locks_await(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let args = parse_macro_input!(item as Args);
+    let t = derive(args);
+    quote!(
+        #t
+        let locks = future.await?;
+    )
+    .into()
+}
+
+fn derive(args: Args) -> TokenStream {
     let as_muts = impl_as_muts(&args);
     let as_refs = impl_as_refs(&args);
     let locks = impl_struct(&args);
@@ -35,15 +54,16 @@ pub fn derive(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
         quote! {}
     };
 
-    quote!(async {
-        #dir
-
+    quote!(
         #locks
-        #as_muts
-        #as_refs
-        #locks_fut
-    })
-    .into()
+
+        let future = async {
+            #dir
+            #as_muts
+            #as_refs
+            #locks_fut
+        };
+    )
 }
 
 fn config_dir() -> Option<PathBuf> {
@@ -300,12 +320,14 @@ fn impl_as_refs(args: &Args) -> TokenStream {
         match f.access {
             Access::Read | Access::Write => quote! {
                 impl AsRef<#t> for Locks {
+                    #[inline(always)]
                     fn as_ref(&self) -> &#t {
                         self.#n.as_ref()
                     }
                 }
 
                 impl AsRef<Option<#t>> for Locks {
+                    #[inline(always)]
                     fn as_ref(&self) -> &Option<#t> {
                         self.#n.as_ref()
                     }
@@ -313,6 +335,7 @@ fn impl_as_refs(args: &Args) -> TokenStream {
             },
             Access::ReadOpt | Access::WriteOpt => quote! {
                 impl AsRef<Option<#t>> for Locks {
+                    #[inline(always)]
                     fn as_ref(&self) -> &Option<#t> {
                         self.#n.as_ref()
                     }

@@ -1,10 +1,9 @@
 use once_cell::sync::OnceCell;
-use parking_lot::Mutex;
-use std::{cell::Cell, ops::Deref, sync::Arc};
-use thread_local::ThreadLocal;
+use parking_lot::RwLock;
+use std::{ops::Deref, sync::Arc};
 use version_tag::{combine, VersionTag};
 
-pub struct VersionCache<T: Send + Sync>(OnceCell<Inner<T>>);
+pub struct VersionCache<T: Send + Sync>(OnceCell<RwLock<Option<CacheData<T>>>>);
 
 impl<T> VersionCache<T>
 where
@@ -19,15 +18,37 @@ where
         T: Send + Sync,
         F: FnOnce() -> T,
     {
-        self.0
-            .get_or_init(Inner::new)
-            .get_or_init(init, combine(tags))
+        let tag = combine(tags);
+        let lock = self.0.get_or_init(|| RwLock::new(None));
+
+        if let Some(cache_data) = lock.read().as_ref().filter(|v| v.tag() == tag) {
+            return cache_data.clone();
+        }
+
+        let mut opt = lock.write();
+
+        if let Some(cache_data) = opt.as_ref().filter(|v| v.tag() == tag) {
+            return cache_data.clone();
+        }
+
+        let data = init();
+        let cache_data = CacheData::new(data, tag);
+
+        *opt = Some(cache_data.clone());
+
+        cache_data
     }
 }
 
 pub struct CacheData<T>(Arc<(T, VersionTag)>);
 
 impl<T> CacheData<T> {
+    #[inline]
+    fn new(data: T, tag: VersionTag) -> Self {
+        CacheData(Arc::new((data, tag)))
+    }
+
+    #[inline]
     pub fn tag(&self) -> VersionTag {
         (self.0).1
     }
@@ -42,92 +63,21 @@ impl<T> Clone for CacheData<T> {
 impl<T> Deref for CacheData<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &(self.0).0
     }
 }
 
-struct Inner<T>
-where
-    T: Send + Sync,
-{
-    local: ThreadLocal<Cell<Option<CacheData<T>>>>,
-    mutex: Mutex<Option<CacheData<T>>>,
-}
-
-impl<T> Inner<T>
-where
-    T: Send + Sync,
-{
-    fn new() -> Self {
-        Self {
-            local: ThreadLocal::new(),
-            mutex: Mutex::new(None),
-        }
-    }
-
-    fn get_or_init<F>(&self, init: F, tag: VersionTag) -> CacheData<T>
-    where
-        F: FnOnce() -> T,
-    {
-        let cell = self.local.get_or(|| Cell::new(None));
-
-        match cell.take() {
-            Some(v) if v.tag() == tag => {
-                cell.set(Some(v.clone()));
-                return v;
-            }
-            Some(v) if v.tag() > tag => {
-                cell.set(Some(v));
-                init_lock(&self.mutex, init, tag)
-            }
-            _ => {
-                let v = init_lock(&self.mutex, init, tag);
-                cell.set(Some(v.clone()));
-                v
-            }
-        }
-    }
-}
-
-fn init_lock<T, F>(mutex: &Mutex<Option<CacheData<T>>>, init: F, tag: VersionTag) -> CacheData<T>
-where
-    F: FnOnce() -> T,
-{
-    let mut guard = mutex.lock();
-
-    let guard_version = match &*guard {
-        Some(v) if v.tag() == tag => {
-            return v.clone();
-        }
-        Some(v) => Some(v.tag()),
-        None => None,
-    };
-
-    let data = CacheData(Arc::new((init(), tag)));
-
-    if guard_version.map_or(true, |v| v < tag) {
-        *guard = Some(data.clone());
-    }
-
-    data
-}
-
 #[test]
-fn cache_update_only_on_higher_version() {
+fn it_works() {
     let old_dep = VersionTag::new();
     let new_dep = VersionTag::new();
     let cache = VersionCache::new();
 
     // cache will be created using the new dependency first
-    let data = cache.get_or_init(|| 1, &[new_dep]);
-    assert_eq!((1, new_dep), (*data, data.tag()));
-
-    // cache should should return the old dependency value
-    let data = cache.get_or_init(|| 0, &[old_dep]);
-    assert_eq!((0, old_dep), (*data, data.tag()));
-
-    let new_dep = VersionTag::new();
+    let data = cache.get_or_init(|| 1, &[old_dep]);
+    assert_eq!((1, old_dep), (*data, data.tag()));
 
     // cache should be updated now
     let data = cache.get_or_init(|| 2, &[new_dep]);

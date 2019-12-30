@@ -89,7 +89,12 @@ pub fn entity_id(input: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn locks(item: TokenStream) -> TokenStream {
-    lock_derive::derive(item)
+    lock_derive::locks(item)
+}
+
+#[proc_macro]
+pub fn locks_await(item: TokenStream) -> TokenStream {
+    lock_derive::locks_await(item)
 }
 
 #[proc_macro_attribute]

@@ -226,6 +226,7 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         .iter()
         .filter(|f| f.is_key())
         .map(|_| quote! { None });
+        
     let keys_none = quote! { #(#keys_none),* };
 
     let sql_query = sql_query(input)?;
@@ -237,24 +238,28 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl AsRef<Self> for #table {
+            #[inline]
             fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl flock::AsLock for #table {
+            #[inline]
             fn as_lock() -> &'static flock::Lock<Self> {
                 &#lock
             }
         }
 
         impl flock::AsMutOpt<Self> for #table {
+            #[inline]
             fn as_mut_opt(&mut self) -> Option<&mut Self> {
                 Some(self)
             }
         }
 
         impl flock::EntityBy<#key_ty, #ident> for #table {
+            #[inline]
             fn entity_by(&self, #key_ident: #key_ty) -> Option<&#ident> {
                 self.map.get(&#key_ident)
             }
@@ -272,25 +277,30 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl flock::SetTag for #table {
+            #[inline]
             fn set_tag(&mut self, tag: flock::version_tag::VersionTag) {
                 self.tag = tag;
             }
         }
 
         impl #table {
+            #[inline]
             pub fn get(&self, #key_ident_ty) -> Option<&#ident> {
                 self.map.get(&#key_ident)
             }
 
+            #[inline]
             pub fn is_empty(&self) -> bool {
                 self.map.is_empty()
             }
 
+            #[inline]
             pub fn insert(&mut self, #key_ident_ty, value: #ident) {
                 self.map.insert(#key_ident, value);
             }
 
-            pub fn iter(&self) -> impl Iterator<Item = &#ident> {
+            #[inline]
+            pub fn iter(&self) -> std::collections::hash_map::Values<#key_ty, #ident> {
                 self.map.values()
             }
 
@@ -332,12 +342,24 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 })
             }
 
+            #[inline]
             pub fn len(&self) -> usize {
                 self.map.len()
             }
 
+            #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
+            }
+        }
+
+        impl<'a> std::iter::IntoIterator for &'a #table {
+            type IntoIter = std::collections::hash_map::Values<'a, #key_ty, #ident>;
+            type Item = &'a #ident;
+
+            #[inline]
+            fn into_iter(self) -> Self::IntoIter {
+                self.iter()
             }
         }
 
@@ -394,24 +416,28 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl AsRef<Self> for #table {
+            #[inline]
             fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl flock::AsLock for #table {
+            #[inline]
             fn as_lock() -> &'static flock::Lock<Self> {
                 &#lock
             }
         }
 
         impl flock::AsMutOpt<Self> for #table {
+            #[inline]
             fn as_mut_opt(&mut self) -> Option<&mut Self> {
                 Some(self)
             }
         }
 
         impl flock::EntityBy<#key_ty, #ident> for #table {
+            #[inline(always)]
             fn entity_by(&self, key: #key_ty) -> Option<&#ident> {
                 #table::get(self, key)
             }
@@ -429,12 +455,14 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl flock::SetTag for #table {
+            #[inline]
             fn set_tag(&mut self, tag: flock::version_tag::VersionTag) {
                 self.tag = tag;
             }
         }
 
         impl #table {
+            #[inline]
             pub fn get(&self, #key_name: #key_ty) -> Option<&#ident> {
                 self.vec.get(#key_name.into())
             }
@@ -443,11 +471,13 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.vec.insert(#key_name.into(), value);
             }
 
+            #[inline]
             pub fn is_empty(&self) -> bool {
                 self.vec.is_empty()
             }
 
-            pub fn iter(&self) -> impl Iterator<Item = &#ident> {
+            #[inline]
+            pub fn iter(&self) -> flock::vec_opt::Iter<#ident> {
                 self.vec.iter()
             }
 
@@ -491,12 +521,24 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 })
             }
 
+            #[inline]
             pub fn len(&self) -> usize {
                 self.vec.len()
             }
 
+            #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
+            }
+        }
+
+        impl<'a> std::iter::IntoIterator for &'a #table {
+            type IntoIter = flock::vec_opt::Iter<'a, #ident>;
+            type Item = &'a #ident;
+
+            #[inline]
+            fn into_iter(self) -> Self::IntoIter {
+                self.iter()
             }
         }
 
