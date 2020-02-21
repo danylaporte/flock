@@ -64,12 +64,15 @@ impl<T> Default for VecOpt<T> {
     }
 }
 
-impl<A> FromIterator<(usize, A)> for VecOpt<A> {
-    fn from_iter<I: IntoIterator<Item = (usize, A)>>(iter: I) -> Self {
+impl<K, V> FromIterator<(K, V)> for VecOpt<V>
+where
+    K: Into<usize>,
+{
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
         let mut vec = VecOpt::default();
 
-        for (idx, item) in iter {
-            vec.insert(idx, item);
+        for (key, value) in iter {
+            vec.insert(key.into(), value);
         }
 
         vec
@@ -108,7 +111,7 @@ mod tests {
 
     #[test]
     fn collect() {
-        let v: VecOpt<_> = (0..2).map(|i| (i, false)).collect();
+        let v: VecOpt<_> = (0..2usize).map(|i| (i, false)).collect();
         assert_eq!(2, v.len());
     }
 

@@ -226,7 +226,7 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         .iter()
         .filter(|f| f.is_key())
         .map(|_| quote! { None });
-        
+
     let keys_none = quote! { #(#keys_none),* };
 
     let sql_query = sql_query(input)?;

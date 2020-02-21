@@ -63,7 +63,7 @@ impl<T: SetTag> AsRef<T> for WriteGuard<T> {
 
 impl<T: SetTag> Deref for WriteGuard<T> {
     type Target = T;
-    
+
     fn deref(&self) -> &T {
         self.guard.deref().as_ref().expect("WriteGuard")
     }
