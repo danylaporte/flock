@@ -1,6 +1,5 @@
-use std::mem::replace;
+use std::{iter::FromIterator, mem::replace};
 
-#[doc(hidden)]
 pub struct VecOpt<T> {
     vec: Vec<Option<T>>,
     len: usize,
@@ -65,6 +64,18 @@ impl<T> Default for VecOpt<T> {
     }
 }
 
+impl<A> FromIterator<(usize, A)> for VecOpt<A> {
+    fn from_iter<I: IntoIterator<Item = (usize, A)>>(iter: I) -> Self {
+        let mut vec = VecOpt::default();
+
+        for (idx, item) in iter {
+            vec.insert(idx, item);
+        }
+
+        vec
+    }
+}
+
 pub struct Iter<'a, T> {
     iter: std::slice::Iter<'a, Option<T>>,
     len: usize,
@@ -94,6 +105,12 @@ impl<'a, T> Iterator for Iter<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collect() {
+        let v: VecOpt<_> = (0..2).map(|i| (i, false)).collect();
+        assert_eq!(2, v.len());
+    }
 
     #[test]
     fn insert_remove() {
