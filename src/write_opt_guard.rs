@@ -1,5 +1,5 @@
 use crate::{AsMutOpt, SetTag};
-use async_std::sync::RwLockWriteGuard;
+use tokio::sync::RwLockWriteGuard;
 use std::ops::{Deref, DerefMut};
 use version_tag::VersionTag;
 

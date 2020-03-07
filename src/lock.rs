@@ -1,7 +1,7 @@
 use crate::{
     ConnOrFactory, LoadFromSql, ReadGuard, ReadOptGuard, SetTag, WriteGuard, WriteOptGuard,
 };
-use async_std::sync::RwLock;
+use tokio::sync::RwLock;
 use failure::Error;
 use once_cell::sync::OnceCell;
 

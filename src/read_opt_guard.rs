@@ -1,5 +1,5 @@
-use async_std::sync::RwLockReadGuard;
 use std::ops::Deref;
+use tokio::sync::RwLockReadGuard;
 
 pub struct ReadOptGuard<T: 'static>(pub(crate) RwLockReadGuard<'static, Option<T>>);
 
