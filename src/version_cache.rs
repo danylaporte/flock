@@ -21,8 +21,11 @@ where
         let tag = combine(tags);
         let lock = self.0.get_or_init(|| RwLock::new(None));
 
-        if let Some(cache_data) = lock.read().as_ref().filter(|v| v.tag() == tag) {
-            return cache_data.clone();
+        // ensure read lock must is drop before acquiring the write
+        {
+            if let Some(cache_data) = lock.read().as_ref().filter(|v| v.tag() == tag) {
+                return cache_data.clone();
+            }
         }
 
         let mut opt = lock.write();
