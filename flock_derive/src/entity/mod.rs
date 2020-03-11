@@ -575,7 +575,8 @@ fn translation_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream>
 
             Some(quote! {
                 if let Some(v) = row.get(#index).context(#name)? {
-                    entity.#ident[culture] = flock::mssql_client::FromColumn::from_column(v).context(#name)?;
+                    let s: &str = flock::mssql_client::FromColumn::from_column(v).context(#name)?;
+                    entity.#ident.set(culture, s);
                 }
             })
         });
