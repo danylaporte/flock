@@ -1,9 +1,9 @@
 use crate::{
     ConnOrFactory, LoadFromSql, ReadGuard, ReadOptGuard, SetTag, WriteGuard, WriteOptGuard,
 };
-use tokio::sync::RwLock;
 use failure::Error;
 use once_cell::sync::OnceCell;
+use tokio::sync::RwLock;
 
 pub struct Lock<T>(OnceCell<RwLock<Option<T>>>);
 
@@ -74,4 +74,54 @@ impl<T> Lock<T> {
     {
         WriteOptGuard::new(self.get().write().await)
     }
+}
+
+#[tokio::test(threaded_scheduler)]
+async fn deadlock_test_read() -> Result<(), Error> {
+    use futures03::stream::StreamExt;
+    use std::time::Duration;
+
+    static LOCK: Lock<MyTestTable> = Lock::new();
+
+    let stream = futures03::stream::FuturesUnordered::new();
+
+    for i in 0..5 {
+        stream.push(async move {
+            let conn = ConnOrFactory::from_env("DB")?;
+            let guard = LOCK.read(conn).await?;
+            tokio::time::delay_for(Duration::from_millis(i * 5)).await;
+            drop(guard);
+
+            tokio::time::delay_for(Duration::from_millis(i * 2)).await;
+
+            let mut guard = LOCK.write_opt().await;
+            tokio::time::delay_for(Duration::from_millis(i * 3)).await;
+            *guard = None;
+            Result::<(), Error>::Ok(())
+        });
+    }
+
+    let _ = stream.collect::<Vec<_>>().await;
+
+    Ok(())
+}
+
+#[cfg(test)]
+struct MyTestTable;
+
+#[cfg(test)]
+impl LoadFromSql for MyTestTable {
+    fn load_from_sql(
+        conn: ConnOrFactory,
+    ) -> futures03::future::LocalBoxFuture<'static, Result<(ConnOrFactory, Self), Error>> {
+        Box::pin(async {
+            tokio::time::delay_for(std::time::Duration::from_millis(20)).await;
+            Ok((conn, Self))
+        })
+    }
+}
+
+#[cfg(test)]
+impl SetTag for MyTestTable {
+    fn set_tag(&mut self, _tag: version_tag::VersionTag) {}
 }

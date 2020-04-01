@@ -26,6 +26,7 @@ pub fn generate(input: ItemTrait) -> TokenStream {
         let fields = relations.iter().map(|r| &r.field);
         let methods = relations.iter().map(|r| &r.method);
         let types = relations.iter().map(|r| &r.relation);
+        let tests = relations.iter().map(|r| &r.test);
 
         quote! {
             #(#types)*
@@ -47,6 +48,14 @@ pub fn generate(input: ItemTrait) -> TokenStream {
                     }
                 }
             }
+
+            #[cfg(test)]
+            mod relation_tests {
+                use super::*;
+                use flock::tokio;
+
+                #(#tests)*
+            }
         }
     } else {
         quote! { #(#errors)* }
@@ -59,6 +68,13 @@ fn relation(f: &TraitItemMethod) -> RelationData {
     let relation = Ident::new(&ident_str.to_pascal_case(), ident.span());
     let static_ident = Ident::new(&ident_str.to_screaming_snake_case(), ident.span());
     let args = &f.sig.inputs;
+
+    let locks_await = args.iter().map(|a| match a.ty() {
+        Ok(t) => quote! { #t, },
+        Err(e) => e,
+    });
+
+    let locks_await = quote! { #(#locks_await)* };
 
     let wheres = args.iter().map(|a| match a.ty() {
         Ok(t) => quote! { AsRef<#t> + },
@@ -145,6 +161,17 @@ fn relation(f: &TraitItemMethod) -> RelationData {
                 }
             }
         },
+        test: quote! {
+            #[tokio::test]
+            async fn #ident() -> Result<(), flock::failure::Error> {
+                flock::locks_await! {
+                    read: [#locks_await]
+                }
+
+                #relation::from(locks);
+                Ok(())
+            }
+        },
     }
 }
 
@@ -201,6 +228,7 @@ struct RelationData {
     init: TokenStream,
     method: TokenStream,
     relation: TokenStream,
+    test: TokenStream,
 }
 
 trait FnArgExt {

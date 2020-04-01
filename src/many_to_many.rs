@@ -1,8 +1,4 @@
 use crate::iter::ManyIter;
-use rayon::{
-    iter::{IntoParallelRefMutIterator, ParallelIterator},
-    join,
-};
 use std::iter::FromIterator;
 
 pub struct ManyToMany<L, R> {
@@ -65,7 +61,7 @@ where
         where
             T: Ord + Send,
         {
-            v.par_iter_mut().for_each(|v| {
+            v.iter_mut().for_each(|v| {
                 v.sort_unstable();
                 v.dedup();
                 v.shrink_to_fit();
@@ -73,7 +69,10 @@ where
             v.shrink_to_fit();
         }
 
-        join(|| dedup(&mut left), || dedup(&mut right));
+        dedup(&mut left);
+        dedup(&mut right);
+
+        //join(|| dedup(&mut left), || dedup(&mut right));
 
         Self { left, right }
     }

@@ -1,6 +1,6 @@
 #![feature(proc_macro_hygiene)]
 
-use flock::{failure::Error, locks, Entity};
+use flock::{failure::Error, locks, relations, Entity};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -17,8 +17,19 @@ async fn main() -> Result<(), Error> {
 
 #[derive(Entity)]
 #[table("[dbo].[Settings]")]
-struct Setting {
+pub struct Setting {
     #[key]
     key: String,
     value: String,
+}
+
+#[relations]
+trait Relations {
+    fn relation1(setting: Settings) -> bool {
+        setting.iter().any(|_| true)
+    }
+
+    fn relation2(setting: Settings) -> bool {
+        setting.iter().any(|_| true)
+    }
 }

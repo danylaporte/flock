@@ -1,5 +1,4 @@
 use crate::iter::ManyIter;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::{
     iter::{Enumerate, FromIterator},
     marker::PhantomData,
@@ -47,11 +46,11 @@ where
             vec[idx].push(many);
         }
 
-        vec.par_iter_mut().for_each(|vec| {
+        for vec in &mut vec {
             vec.sort_unstable();
             vec.dedup();
             vec.shrink_to_fit();
-        });
+        }
 
         vec.shrink_to_fit();
 
