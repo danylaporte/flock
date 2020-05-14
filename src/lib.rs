@@ -39,6 +39,7 @@ pub use many_to_many::ManyToMany;
 pub use mssql_client;
 pub use once_cell::sync::OnceCell;
 pub use one_to_many::OneToMany;
+pub use parking_lot;
 pub use rayon;
 pub use read_guard::*;
 pub use read_opt_guard::*;
