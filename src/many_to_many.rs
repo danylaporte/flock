@@ -7,6 +7,25 @@ pub struct ManyToMany<L, R> {
 }
 
 impl<L, R> ManyToMany<L, R> {
+    pub fn contains_left_right(&self, l: L, r: R) -> bool
+    where
+        L: Clone + Into<usize> + Ord,
+        R: Clone + Into<usize> + Ord,
+    {
+        self.left
+            .get(r.clone().into())
+            .and_then(|left| {
+                let right = self.right.get(l.clone().into())?;
+
+                Some(if left.len() < right.len() {
+                    left.binary_search(&l).is_ok()
+                } else {
+                    right.binary_search(&r).is_ok()
+                })
+            })
+            .unwrap_or(false)
+    }
+
     pub fn iter_left_by(&self, id: R) -> ManyIter<L>
     where
         L: Clone,
@@ -76,6 +95,16 @@ where
 
         Self { left, right }
     }
+}
+
+#[test]
+fn test_contains_left_right() {
+    let m2m = std::iter::once((1, 3)).collect::<ManyToMany<usize, usize>>();
+
+    assert!(m2m.contains_left_right(1, 3));
+    assert!(!m2m.contains_left_right(3, 1));
+    assert!(!m2m.contains_left_right(2, 2));
+    assert!(!m2m.contains_left_right(2, 5));
 }
 
 #[test]

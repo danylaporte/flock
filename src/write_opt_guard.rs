@@ -1,6 +1,6 @@
 use crate::{AsMutOpt, SetTag};
-use tokio::sync::RwLockWriteGuard;
 use std::ops::{Deref, DerefMut};
+use tokio::sync::RwLockWriteGuard;
 use version_tag::VersionTag;
 
 pub struct WriteOptGuard<T: SetTag + 'static> {

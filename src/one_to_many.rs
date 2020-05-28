@@ -11,6 +11,16 @@ pub struct OneToMany<ONE, MANY> {
 }
 
 impl<ONE, MANY> OneToMany<ONE, MANY> {
+    pub fn contains_one_many(&self, id: ONE, many: MANY) -> bool
+    where
+        ONE: Into<usize>,
+        MANY: Ord,
+    {
+        self.vec
+            .get(id.into())
+            .map_or(false, |vec| vec.binary_search(&many).is_ok())
+    }
+
     pub fn iter(&self) -> OneIter<ONE, MANY> {
         OneIter {
             iter: self.vec.iter().enumerate(),
@@ -87,4 +97,14 @@ where
             .filter(|(_, v)| !v.is_empty())
             .map(|(i, v)| (i.into(), v.as_slice()))
     }
+}
+
+#[test]
+fn test_contains_one_many() {
+    let o2m = std::iter::once((1, 3)).collect::<OneToMany<usize, usize>>();
+
+    assert!(o2m.contains_one_many(1, 3));
+    assert!(!o2m.contains_one_many(3, 1));
+    assert!(!o2m.contains_one_many(2, 2));
+    assert!(!o2m.contains_one_many(2, 5));
 }
