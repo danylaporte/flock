@@ -11,6 +11,11 @@ impl<T> VecOpt<T> {
         self.len = 0;
     }
 
+    fn ensure_index(&mut self, index: usize) {
+        let empty_elements = (self.vec.len()..=index).into_iter().map(|_| None);
+        self.vec.extend(empty_elements);
+    }
+
     pub fn get(&self, idx: usize) -> Option<&T> {
         self.vec.get(idx)?.as_ref()
     }
@@ -20,8 +25,7 @@ impl<T> VecOpt<T> {
     }
 
     pub fn insert(&mut self, index: usize, entity: T) {
-        let empty_elements = (self.vec.len()..=index).into_iter().map(|_| None);
-        self.vec.extend(empty_elements);
+        self.ensure_index(index);
 
         if replace(&mut self.vec[index], Some(entity)).is_none() {
             self.len += 1;
@@ -52,6 +56,17 @@ impl<T> VecOpt<T> {
         {
             self.len -= 1;
         }
+    }
+
+    pub fn take(&mut self, index: usize) -> Option<T> {
+        self.ensure_index(index);
+        let item = replace(&mut self.vec[index], None);
+
+        if item.is_some() {
+            self.len -= 1;
+        }
+
+        item
     }
 }
 

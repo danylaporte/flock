@@ -1,6 +1,6 @@
 #![feature(proc_macro_hygiene)]
 
-use flock::{failure::Error, locks, Entity, EntityId};
+use flock::{failure::Error, locks, Entity, EntityId, MergeSql};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {

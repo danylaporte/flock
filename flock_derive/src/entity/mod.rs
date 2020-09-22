@@ -1,17 +1,21 @@
+#[macro_use]
+mod macros;
+
 mod attrs_ext;
 mod derive_input_ext;
 mod errors;
 mod field_ext;
-
-#[macro_use]
-mod macros;
+mod merge_sql;
+mod sql_string_ext;
 
 use derive_input_ext::DeriveInputExt;
 use errors::Errors;
 use field_ext::FieldExt;
 use inflector::Inflector;
+pub(crate) use merge_sql::merge;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
+use sql_string_ext::SqlStringExt;
 use syn::{spanned::Spanned, DeriveInput, Error, Ident, LitBool, LitInt, LitStr};
 
 pub fn generate(input: DeriveInput) -> TokenStream {

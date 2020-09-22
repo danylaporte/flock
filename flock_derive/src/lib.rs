@@ -97,6 +97,47 @@ pub fn locks_await(item: TokenStream) -> TokenStream {
     lock_derive::locks_await(item)
 }
 
+/// Turn a struct into an entity, implementing the load from the db and
+/// creating a table for storing it.
+///
+/// # Example
+///
+/// Load a simple table
+/// ```
+/// use flock_derive::{Entity, EntityId};
+///
+/// #[derive(Entity)]
+/// #[table("[dbo].[Accounts]")]
+/// #[where_clause("[Name] IS NOT NULL")]
+/// pub struct Account {
+///     #[key]
+///     pub id: AccountId,
+///     pub name: String,
+///     pub address: Option<String>,
+/// }
+///
+/// #[derive(flock_derive::EntityId)]
+/// pub struct AccountId(u32);
+/// ```
+///
+/// Load a multi-key table
+/// ```
+/// use flock::MergeSql;
+///
+/// #[derive(MergeSql)]
+/// #[table("[dbo].[Users]")]
+/// pub struct User {
+///     #[key]
+///     user_id: i32,
+///     name: String,
+/// }
+/// ```
+#[proc_macro_derive(MergeSql, attributes(column, key, table, translated))]
+pub fn merge_sql(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    entity::merge(&input).into()
+}
+
 #[proc_macro_attribute]
 pub fn relations(_args: TokenStream, input: TokenStream) -> TokenStream {
     let f = parse_macro_input!(input as ItemTrait);
