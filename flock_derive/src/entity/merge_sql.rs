@@ -166,10 +166,10 @@ fn merge_execute<'a>(
     };
 
     let sql = format!(
-        "MERGE {table} WITH (UPDLOCK) AS t USING (SELECT 1) AS s \
+        "MERGE {table} WITH (UPDLOCK) AS t USING (SELECT 1 A) AS s \
         ON {target_cond} \
         {update} \
-        WHEN NOT MATCHED BY TARGET THEN INSERT ({insert_names}) VALUES ({insert_values})",
+        WHEN NOT MATCHED BY TARGET THEN INSERT ({insert_names}) VALUES ({insert_values});",
         insert_names = insert_names,
         insert_values = insert_values,
         table = table,

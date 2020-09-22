@@ -1,3 +1,36 @@
+//! # flock
+//!
+//! A framework for integrating in memory mssql entities.
+//!
+//! ## Merge sql macros
+//!
+//! ```no_run
+//! use flock::{MergeSql, failure::Error, mssql_client::Connection};
+//!
+//! #[derive(MergeSql)]
+//! #[table("[dbo].[#User]")]
+//! struct User {
+//!    #[key]
+//!    id: i32,
+//!    name: String,
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Error> {
+//!     let conn = Connection::from_env("DB").await?;
+//!     let conn = conn.execute("CREATE TABLE #User (Id INT, name VARCHAR(50))", ()).await?;
+//!     let trans = conn.transaction().await?;
+//!
+//!     let new_user = User {
+//!         id: 1,
+//!         name: "A new user".to_string(),
+//!     };
+//!     
+//!     let _trans = new_user.merge_sql(trans).await?;
+//!     Ok(())
+//! }
+//! ```
+
 #![feature(const_fn)]
 
 mod as_lock;
