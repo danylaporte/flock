@@ -1,12 +1,12 @@
 #![feature(proc_macro_hygiene)]
 
 use flock::{
-    failure::Error, futures03::future::LocalBoxFuture, locks, version_tag::VersionTag, AsLock,
-    ConnOrFactory, LoadFromSql, Lock, SetTag,
+    futures03::future::LocalBoxFuture, locks, version_tag::VersionTag, AsLock, ConnOrFactory,
+    LoadFromSql, Lock, Result, SetTag,
 };
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<()> {
     {
         let _locks = locks!(read: [Accounts]).await?;
     }
@@ -33,7 +33,7 @@ impl AsLock for Accounts {
 impl LoadFromSql for Accounts {
     fn load_from_sql(
         _conn: ConnOrFactory,
-    ) -> LocalBoxFuture<'static, Result<(ConnOrFactory, Self), Error>> {
+    ) -> LocalBoxFuture<'static, Result<(ConnOrFactory, Self)>> {
         unimplemented!()
     }
 }

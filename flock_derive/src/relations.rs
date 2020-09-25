@@ -52,7 +52,6 @@ pub fn generate(input: ItemTrait) -> TokenStream {
             #[cfg(test)]
             mod relation_tests {
                 use super::*;
-                use flock::tokio;
 
                 #(#tests)*
             }
@@ -163,7 +162,7 @@ fn relation(f: &TraitItemMethod) -> RelationData {
         },
         test: quote! {
             #[tokio::test]
-            async fn #ident() -> Result<(), flock::failure::Error> {
+            async fn #ident() -> flock::Result<()> {
                 flock::locks_await! {
                     read: [#locks_await]
                 }

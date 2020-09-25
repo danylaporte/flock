@@ -1,4 +1,4 @@
-use failure::Error;
+use crate::Result;
 use mssql_client::{Connection, ConnectionFactory};
 
 pub enum ConnOrFactory {
@@ -7,14 +7,14 @@ pub enum ConnOrFactory {
 }
 
 impl ConnOrFactory {
-    pub async fn connect(self) -> Result<Connection, Error> {
-        match self {
-            ConnOrFactory::Connection(conn) => Ok(conn),
-            ConnOrFactory::Factory(fact) => fact.create_connection().await,
-        }
+    pub async fn connect(self) -> Result<Connection> {
+        Ok(match self {
+            ConnOrFactory::Connection(conn) => conn,
+            ConnOrFactory::Factory(fact) => fact.create_connection().await?,
+        })
     }
 
-    pub fn from_env(s: &str) -> Result<ConnOrFactory, Error> {
+    pub fn from_env(s: &str) -> Result<ConnOrFactory> {
         Ok(ConnOrFactory::Factory(ConnectionFactory::from_env(s)?))
     }
 }

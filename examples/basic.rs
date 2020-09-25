@@ -1,9 +1,9 @@
 #![feature(proc_macro_hygiene)]
 
-use flock::{failure::Error, locks, Entity, EntityId, MergeSql};
+use flock::{locks, Entity, EntityId, Result};
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<()> {
     let locks = locks!(read: [Accounts]).await?;
 
     locks

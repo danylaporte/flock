@@ -1,9 +1,9 @@
 #![feature(proc_macro_hygiene)]
 
-use flock::{failure::Error, locks, relations, Entity};
+use flock::{locks, relations, Entity, Result};
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<()> {
     let locks = locks!(read: [Settings]).await?;
 
     locks

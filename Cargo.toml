@@ -7,23 +7,23 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-failure = "0.1"
 flock_derive = { path = "flock_derive" }
 futures03 = { package = "futures", version = "0.3" }
 indexmap = "1.6"
-log = "0.4"
 mssql_client = { git = "https://github.com/danylaporte/mssql_client.git" }
 once_cell = "1.4"
 parking_lot = "0.11"
 rayon = "1.4"
 serde = "1.0"
 thread_local = "1.0"
-tokio = { version = "0.2", features = ["macros", "rt-core", "rt-util", "sync"] }
+tokio = { version = "0.2", features = ["macros", "sync"] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
 version_tag = { git = "https://github.com/danylaporte/version_tag.git" }
 
 [dev-dependencies]
 tokio = { version = "0.2", features = ["macros", "rt-core", "rt-util", "sync", "time"] }
+tracing = "0.1"
+tracing-futures = "0.2"
 
 [workspace]
 members = [

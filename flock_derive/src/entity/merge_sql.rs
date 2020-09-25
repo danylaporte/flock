@@ -46,7 +46,7 @@ fn impl_merge(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 mut trans: flock::mssql_client::Transaction,
             ) -> flock::futures03::future::LocalBoxFuture<
                 'a,
-                std::result::Result<flock::mssql_client::Transaction, flock::failure::Error>,
+                flock::Result<flock::mssql_client::Transaction>,
             >
             {
                 Box::pin(async move {

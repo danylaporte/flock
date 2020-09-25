@@ -247,7 +247,7 @@ fn locks_fut(args: &Args) -> TokenStream {
 
         #(#resolve_guards)*
 
-        std::result::Result::<_, flock::failure::Error>::Ok(Locks {
+        flock::Result::<_>::Ok(Locks {
             #(#fields,)*
         })
     }
