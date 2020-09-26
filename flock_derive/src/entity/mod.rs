@@ -43,34 +43,73 @@ fn new_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
     let ident = &input.ident;
     let mut errors = Vec::new();
     let mut idx = 0;
+    let mut batch = Vec::with_capacity(5);
+    let mut vars = Vec::with_capacity(fields.len());
+    let mut instantiate = Vec::with_capacity(fields.len());
 
-    let fields = fields.iter().filter_map(|f| {
-        let ident = f.ident().map_err(|e| errors.push(e)).ok()?;
+    fn dump_batch_single(batch: &mut Vec<(&Ident, usize)>, vars: &mut Vec<TokenStream>) {
+        if !batch.is_empty() {
+            for (ident, idx) in &*batch {
+                let index = LitInt::new(&idx.to_string(), ident.span());
+                let name = LitStr::new(&ident.to_string(), ident.span());
+
+                vars.push(quote! {
+                    let #ident = match row.get_named_err(#index, #name) {
+                        Ok(v) => v,
+                        Err(e) => return Err(e)
+                    };
+                })
+            }
+            batch.clear();
+        }
+    }
+
+    for f in fields {
+        let ident = match f.ident() {
+            Ok(i) => i,
+            Err(e) => {
+                errors.push(e);
+                continue;
+            }
+        };
 
         if f.is_translated() {
-            return Some(quote! { #ident: Default::default() });
+            dump_batch_single(&mut batch, &mut vars);
+            instantiate.push(quote! { #ident: Default::default(), });
+        } else {
+            batch.push((ident, idx));
+            instantiate.push(quote! { #ident: #ident, });
+            idx += 1;
+
+            if batch.len() == 5 {
+                let variables = batch.iter().map(|t| t.0);
+
+                let names = batch
+                    .iter()
+                    .map(|t| LitStr::new(&t.0.to_string(), t.0.span()));
+
+                let t = batch.first().unwrap();
+                let index = LitInt::new(&t.1.to_string(), t.0.span());
+
+                vars.push(quote! {
+                    let (#(#variables,)*) = match flock::read_5_fields(row, #index, [#(#names,)*]) {
+                        Ok(v) => v,
+                        Err(e) => return Err(e)
+                    };
+                });
+
+                batch.clear();
+            }
         }
-
-        let index = LitInt::new(&idx.to_string(), f.span());
-        let name = LitStr::new(&ident.to_string(), ident.span());
-
-        idx += 1;
-
-        Some(quote! {
-            #ident: row
-                .get(#index)
-                .and_then(flock::mssql_client::FromColumn::from_column)
-                .map_err(|e| Box::new(flock::Error::Field(e, #name)))?
-        })
-    });
-
-    let fields = quote! { #(#fields,)* };
+    }
 
     errors.result()?;
+    dump_batch_single(&mut batch, &mut vars);
 
     Ok(quote! {
         fn new_from_row(row: &flock::mssql_client::Row) -> flock::mssql_client::Result<#ident> {
-            Ok(#ident { #fields })
+            #(#vars)*
+            Ok(#ident { #(#instantiate)* })
         }
     })
 }
@@ -78,48 +117,55 @@ fn new_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
 fn sql_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
     let fields = input.fields()?;
     let mut errors = Vec::new();
+    let mut select = String::with_capacity(1000);
+    let mut wheres = String::with_capacity(250);
+    let mut idx = 1;
 
-    let select = fields
-        .iter()
-        .filter(|f| !f.is_translated())
-        .filter_map(|f| f.column().map_err(|e| errors.push(e)).ok())
-        .map(|v| format!("[{}]", v))
-        .collect::<Vec<_>>()
-        .join(",");
+    for f in fields {
+        if f.is_translated() {
+            continue;
+        }
+
+        let name = match f.column() {
+            Ok(mut n) => {
+                n.insert(0, '[');
+                n.push(']');
+                n
+            }
+            Err(e) => {
+                errors.push(e);
+                continue;
+            }
+        };
+
+        select.add_sep(",").add(&name);
+
+        if f.is_key() {
+            let p = idx.to_string();
+
+            wheres
+                .add_sep(" AND ")
+                .add(&["(p", &p, " IS NULL OR @p", &p, " = ", &name, ")"].concat());
+            idx += 1;
+        }
+    }
 
     let table = input.table().map_err(|e| errors.push(e));
-    let where_clause = input.where_clause_attr().map_err(|e| errors.push(e));
+
+    match input.where_clause_attr() {
+        Ok(Some(w)) => {
+            wheres.add_sep(" AND ").add(&w.value());
+        }
+        Ok(None) => {}
+        Err(e) => errors.push(e),
+    }
 
     errors.result()?;
 
     let table = table.expect("table");
-    let where_clause = where_clause.expect("where_clause");
-
-    let where_clause = fields
-        .iter()
-        .filter(|f| f.is_key())
-        .filter_map(|f| f.column().map_err(|e| errors.push(e)).ok())
-        .enumerate()
-        .map(|(i, v)| {
-            format!(
-                "(@p{p} IS NULL OR @p{p} = [{field}])",
-                p = (i + 1),
-                field = v
-            )
-        })
-        .chain(where_clause.into_iter().map(|t| t.value()))
-        .collect::<Vec<_>>()
-        .join(" AND ");
-
-    errors.result()?;
 
     Ok(LitStr::new(
-        &format!(
-            "SELECT {select} FROM {table} WHERE {where_clause}",
-            select = select,
-            table = table,
-            where_clause = where_clause,
-        ),
+        &["SELECT ", &select, " FROM ", &table, " WHERE ", &wheres].concat(),
         input.span(),
     ))
 }
@@ -132,7 +178,11 @@ fn sql_translated_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
         .iter()
         .filter(|f| f.is_translated())
         .filter_map(|f| f.column().map_err(|e| errors.push(e)).ok())
-        .map(|v| format!("[{}]", v))
+        .map(|mut v| {
+            v.insert(0, '[');
+            v.push(']');
+            v
+        })
         .collect::<Vec<_>>()
         .join(",");
 
@@ -319,19 +369,19 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                     if #is_all_keys_none {
                         ctx.map.clear();
                     } else {
-                        ctx.map.retain(|keys, _| { #retain_keys })
+                        ctx.map.retain(|keys, _| { #retain_keys });
                     }
                 } else {
-                    return Ok((conn, ctx));
+                    return Ok((conn, ctx))
                 }
 
-                let (conn, ctx) = conn
-                    .connect()
-                    .await?
-                    .query_fold(#sql_query, #key_ident, ctx, Self::load_query_fold)
-                    .await?;
-
-                Ok((flock::ConnOrFactory::Connection(conn), ctx))
+                match conn.connect().await {
+                    Ok(conn) => match conn.query_fold(#sql_query, #key_ident, ctx, Self::load_query_fold).await {
+                        Ok((conn, ctx)) => Ok((flock::ConnOrFactory::Connection(conn), ctx)),
+                        Err(e) => Err(e.into()),
+                    },
+                    Err(e) => Err(e),
+                }
             }
 
             fn load_query_fold<C>(mut ctx: C, row: &flock::mssql_client::Row) -> flock::mssql_client::Result<C>
@@ -600,10 +650,8 @@ fn translation_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream>
             let name = LitStr::new(&ident.to_string(), ident.span());
 
             Some(quote! {
-                let map_err = |e| Box::new(flock::Error::Field(e, #name));
-                if let Some(v) = row.get(#index).map_err(map_err)? {
-                    let s: &str = flock::mssql_client::FromColumn::from_column(v).map_err(map_err)?;
-                    entity.#ident.set(culture, s);
+                if let Some(v) = row.get_named_err::<Option<&str>>(#index, #name)? {
+                    entity.#ident.set(culture, v);
                 }
             })
         });
@@ -615,10 +663,10 @@ fn translation_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream>
 
     Ok(quote! {
         fn translation_from_row(vec: &mut flock::VecOpt<#ident>, row: &flock::mssql_client::Row) -> flock::mssql_client::Result<()> {
-            let key = #key_type::try_get_from_uuid(row.get(0).map_err(|e| Box::new(flock::Error::Field(e, #key_name)))?);
+            let key = #key_type::try_get_from_uuid(row.get_named_err(0, #key_name)?);
 
             if let Some(entity) = key.and_then(|key| vec.get_mut(key.into())) {
-                let culture = row.get::<translation::Culture>(1).map_err(|e| Box::new(flock::Error::Field(e, "Culture")))?;
+                let culture = row.get_named_err::<translation::Culture>(1, "Culture")?;
                 #fields
             }
 

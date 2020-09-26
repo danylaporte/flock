@@ -54,6 +54,7 @@ mod set_tag;
 #[doc(hidden)]
 pub mod tests;
 mod try_entity_id_from_uuid;
+mod utils;
 pub mod vec_opt;
 #[doc(hidden)]
 pub mod version_cache;
@@ -86,6 +87,7 @@ pub use result::Result;
 pub use serde;
 pub use set_tag::SetTag;
 pub use try_entity_id_from_uuid::TryEntityIdFromUuid;
+pub use utils::*;
 pub use uuid::Uuid;
 pub use vec_opt::VecOpt;
 pub use version_tag;
