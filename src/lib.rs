@@ -61,7 +61,7 @@ pub mod version_cache;
 mod write_guard;
 mod write_opt_guard;
 
-pub use as_lock::AsLock;
+pub use as_lock::*;
 pub use as_mut_opt::*;
 pub use as_mut_opt_wrapper::AsMutOptWrapper;
 pub use conn_or_factory::ConnOrFactory;

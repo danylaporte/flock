@@ -3,6 +3,7 @@ name = "flock"
 version = "0.10.3"
 authors = ["Dany Laporte <dany_laporte@hotmail.com>"]
 edition = "2018"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

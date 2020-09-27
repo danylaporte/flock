@@ -223,16 +223,16 @@ fn locks_fut(args: &Args) -> TokenStream {
 
         match f.access {
             Access::Read => {
-                quote! { let (conn, #n) = <#t as flock::AsLock>::as_lock().read(conn).await?; }
+                quote! { let (conn, #n) = flock::lock_read::<#t>(conn).await?; }
             }
             Access::ReadOpt => {
-                quote! { let #n = <#t as flock::AsLock>::as_lock().read_opt().await; }
+                quote! { let #n = flock::lock_read_opt::<#t>().await; }
             }
             Access::Write => {
-                quote! { let (conn, #n) = <#t as flock::AsLock>::as_lock().write(conn).await?; }
+                quote! { let (conn, #n) = flock::lock_write::<#t>(conn).await?; }
             }
             Access::WriteOpt => {
-                quote! { let #n = <#t as flock::AsLock>::as_lock().write_opt().await; }
+                quote! { let #n = flock::lock_write_opt::<#t>().await; }
             }
         }
     });
@@ -282,12 +282,14 @@ fn impl_as_muts(args: &Args) -> TokenStream {
             Access::Read | Access::ReadOpt => None,
             Access::Write => Some(quote! {
                 impl AsMut<#t> for Locks {
+                    #[inline]
                     fn as_mut(&mut self) -> &mut #t {
-                        self.#n.as_mut()
+                        &mut self.#n
                     }
                 }
 
                 impl flock::AsMutOpt<#t> for Locks {
+                    #[inline]
                     fn as_mut_opt(&mut self) -> Option<&mut #t> {
                         self.#n.as_mut_opt()
                     }
@@ -295,12 +297,14 @@ fn impl_as_muts(args: &Args) -> TokenStream {
             }),
             Access::WriteOpt => Some(quote! {
                 impl AsMut<Option<#t>> for Locks {
+                    #[inline]
                     fn as_mut(&mut self) -> &mut Option<#t> {
-                        self.#n.as_mut()
+                        &mut self.#n
                     }
                 }
 
                 impl flock::AsMutOpt<#t> for Locks {
+                    #[inline]
                     fn as_mut_opt(&mut self) -> Option<&mut #t> {
                         self.#n.as_mut_opt()
                     }
@@ -320,14 +324,14 @@ fn impl_as_refs(args: &Args) -> TokenStream {
         match f.access {
             Access::Read | Access::Write => quote! {
                 impl AsRef<#t> for Locks {
-                    #[inline(always)]
+                    #[inline]
                     fn as_ref(&self) -> &#t {
-                        self.#n.as_ref()
+                        &self.#n
                     }
                 }
 
                 impl AsRef<Option<#t>> for Locks {
-                    #[inline(always)]
+                    #[inline]
                     fn as_ref(&self) -> &Option<#t> {
                         self.#n.as_ref()
                     }
@@ -335,9 +339,9 @@ fn impl_as_refs(args: &Args) -> TokenStream {
             },
             Access::ReadOpt | Access::WriteOpt => quote! {
                 impl AsRef<Option<#t>> for Locks {
-                    #[inline(always)]
+                    #[inline]
                     fn as_ref(&self) -> &Option<#t> {
-                        self.#n.as_ref()
+                        &self.#n
                     }
                 }
             },

@@ -43,26 +43,7 @@ fn new_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
     let ident = &input.ident;
     let mut errors = Vec::new();
     let mut idx = 0;
-    let mut batch = Vec::with_capacity(5);
-    let mut vars = Vec::with_capacity(fields.len());
     let mut instantiate = Vec::with_capacity(fields.len());
-
-    fn dump_batch_single(batch: &mut Vec<(&Ident, usize)>, vars: &mut Vec<TokenStream>) {
-        if !batch.is_empty() {
-            for (ident, idx) in &*batch {
-                let index = LitInt::new(&idx.to_string(), ident.span());
-                let name = LitStr::new(&ident.to_string(), ident.span());
-
-                vars.push(quote! {
-                    let #ident = match row.get_named_err(#index, #name) {
-                        Ok(v) => v,
-                        Err(e) => return Err(e)
-                    };
-                })
-            }
-            batch.clear();
-        }
-    }
 
     for f in fields {
         let ident = match f.ident() {
@@ -74,44 +55,24 @@ fn new_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         };
 
         if f.is_translated() {
-            dump_batch_single(&mut batch, &mut vars);
             instantiate.push(quote! { #ident: Default::default(), });
         } else {
-            batch.push((ident, idx));
-            instantiate.push(quote! { #ident: #ident, });
+            let index = LitInt::new(&idx.to_string(), ident.span());
+            let name = LitStr::new(&ident.to_string(), ident.span());
+
+            instantiate.push(quote! {
+                #ident: match row.get_named_err(#index, #name) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e)
+                },
+            });
+
             idx += 1;
-
-            if batch.len() == 5 {
-                let variables = batch.iter().map(|t| t.0);
-
-                let names = batch
-                    .iter()
-                    .map(|t| LitStr::new(&t.0.to_string(), t.0.span()));
-
-                let t = batch.first().unwrap();
-                let index = LitInt::new(&t.1.to_string(), t.0.span());
-
-                vars.push(quote! {
-                    let (#(#variables,)*) = match flock::read_5_fields(row, #index, [#(#names,)*]) {
-                        Ok(v) => v,
-                        Err(e) => return Err(e)
-                    };
-                });
-
-                batch.clear();
-            }
         }
     }
 
     errors.result()?;
-    dump_batch_single(&mut batch, &mut vars);
-
-    Ok(quote! {
-        fn new_from_row(row: &flock::mssql_client::Row) -> flock::mssql_client::Result<#ident> {
-            #(#vars)*
-            Ok(#ident { #(#instantiate)* })
-        }
-    })
+    Ok(quote! { #ident { #(#instantiate)* } })
 }
 
 fn sql_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
@@ -145,7 +106,14 @@ fn sql_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
 
             wheres
                 .add_sep(" AND ")
-                .add(&["(p", &p, " IS NULL OR @p", &p, " = ", &name, ")"].concat());
+                .add("(p")
+                .add(&p)
+                .add(" IS NULL OR @p")
+                .add(&p)
+                .add(" = ")
+                .add(&name)
+                .push(']');
+
             idx += 1;
         }
     }
@@ -251,7 +219,8 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         .iter()
         .filter(|f| f.is_key())
         .filter_map(|f| f.ident.as_ref());
-    let key_ident = quote! { (#(#key_ident,)*) };
+    let key_sep_ident = quote! { #(#key_ident,)* };
+    let key_ident = quote! { (#key_sep_ident) };
 
     let key_ty = fields.iter().filter(|f| f.is_key()).map(|f| &f.ty);
     let key_ty = quote! { (#(#key_ty,)*) };
@@ -328,7 +297,7 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                     tag: Default::default(),
                 };
 
-                Box::pin(#table::load(table, conn, #keys_none))
+                Box::pin(Self::load(table, conn, #keys_none))
             }
         }
 
@@ -363,8 +332,15 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             #[tracing::instrument(name = #load_name, skip(ctx, conn), err)]
             pub async fn load<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::Result<(flock::ConnOrFactory, C)>
             where
-                C: flock::AsMutOpt<#table> + 'a,
+                C: flock::AsMutOpt<#table> + 'a
             {
+            //     Self::load_internal(ctx, conn, #key_sep_ident).await
+            // }
+
+            // async fn load_internal<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::Result<(flock::ConnOrFactory, C)>
+            // where
+            //     C: flock::AsMutOpt<#table> + 'a,
+            // {
                 if let Some(ctx) = ctx.as_mut_opt() {
                     if #is_all_keys_none {
                         ctx.map.clear();
@@ -389,7 +365,7 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 C: flock::AsMutOpt<#table>,
             {
                 if let Some(ctx) = ctx.as_mut_opt() {
-                    let row = Self::new_from_row(row)?;
+                    let row = #new_from_row;
                     ctx.map.insert(#key_row_clone, row);
                 }
                 Ok(ctx)
@@ -399,8 +375,6 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             pub fn len(&self) -> usize {
                 self.map.len()
             }
-
-            #new_from_row
 
             #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
@@ -497,7 +471,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         impl flock::EntityBy<#key_ty, #ident> for #table {
             #[inline(always)]
             fn entity_by(&self, key: #key_ty) -> Option<&#ident> {
-                #table::get(self, key)
+                self.get(key)
             }
         }
 
@@ -508,7 +482,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                     vec: Default::default(),
                 };
 
-                Box::pin(#table::load(table, conn, None))
+                Box::pin(Self::load(table, conn, None))
             }
         }
 
@@ -589,7 +563,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 C: flock::AsMutOpt<#table>,
             {
                 if let Some(ctx) = ctx.as_mut_opt() {
-                    let row = Self::new_from_row(row)?;
+                    let row = #new_from_row;
                     ctx.vec.insert(row.#key_name.into(), row);
                 }
                 Ok(ctx)
@@ -599,8 +573,6 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             pub fn len(&self) -> usize {
                 self.vec.len()
             }
-
-            #new_from_row
 
             #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
