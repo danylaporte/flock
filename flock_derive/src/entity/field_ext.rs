@@ -45,7 +45,6 @@ pub trait FieldExt {
 }
 
 impl FieldExt for Field {
-    #[inline]
     fn field(&self) -> &Field {
         self
     }

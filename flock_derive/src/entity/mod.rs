@@ -57,8 +57,9 @@ fn new_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         if f.is_translated() {
             instantiate.push(quote! { #ident: Default::default(), });
         } else {
-            let index = LitInt::new(&idx.to_string(), ident.span());
-            let name = LitStr::new(&ident.to_string(), ident.span());
+            let span = ident.span();
+            let index = LitInt::new(&idx.to_string(), span);
+            let name = LitStr::new(&ident.to_string(), span);
 
             instantiate.push(quote! {
                 #ident: match row.get_named_err(#index, #name) {
@@ -106,13 +107,13 @@ fn sql_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
 
             wheres
                 .add_sep(" AND ")
-                .add("(p")
+                .add("(@p")
                 .add(&p)
                 .add(" IS NULL OR @p")
                 .add(&p)
                 .add(" = ")
                 .add(&name)
-                .push(']');
+                .add(")");
 
             idx += 1;
         }
@@ -131,11 +132,9 @@ fn sql_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
     errors.result()?;
 
     let table = table.expect("table");
+    let sql = ["SELECT ", &select, " FROM ", &table, " WHERE ", &wheres].concat();
 
-    Ok(LitStr::new(
-        &["SELECT ", &select, " FROM ", &table, " WHERE ", &wheres].concat(),
-        input.span(),
-    ))
+    Ok(LitStr::new(&sql, input.span()))
 }
 
 fn sql_translated_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
@@ -263,28 +262,24 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl AsRef<Self> for #table {
-            #[inline]
             fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl flock::AsLock for #table {
-            #[inline]
             fn as_lock() -> &'static flock::Lock<Self> {
                 &#lock
             }
         }
 
         impl flock::AsMutOpt<Self> for #table {
-            #[inline]
             fn as_mut_opt(&mut self) -> Option<&mut Self> {
                 Some(self)
             }
         }
 
         impl flock::EntityBy<#key_ty, #ident> for #table {
-            #[inline]
             fn entity_by(&self, #key_ident: #key_ty) -> Option<&#ident> {
                 self.map.get(&#key_ident)
             }
@@ -302,29 +297,24 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl flock::SetTag for #table {
-            #[inline]
             fn set_tag(&mut self, tag: flock::version_tag::VersionTag) {
                 self.tag = tag;
             }
         }
 
         impl #table {
-            #[inline]
             pub fn get(&self, #key_ident_ty) -> Option<&#ident> {
                 self.map.get(&#key_ident)
             }
 
-            #[inline]
             pub fn is_empty(&self) -> bool {
                 self.map.is_empty()
             }
 
-            #[inline]
             pub fn insert(&mut self, #key_ident_ty, value: #ident) {
                 self.map.insert(#key_ident, value);
             }
 
-            #[inline]
             pub fn iter(&self) -> std::collections::hash_map::Values<#key_ty, #ident> {
                 self.map.values()
             }
@@ -334,13 +324,6 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             where
                 C: flock::AsMutOpt<#table> + 'a
             {
-            //     Self::load_internal(ctx, conn, #key_sep_ident).await
-            // }
-
-            // async fn load_internal<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::Result<(flock::ConnOrFactory, C)>
-            // where
-            //     C: flock::AsMutOpt<#table> + 'a,
-            // {
                 if let Some(ctx) = ctx.as_mut_opt() {
                     if #is_all_keys_none {
                         ctx.map.clear();
@@ -371,12 +354,10 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 Ok(ctx)
             }
 
-            #[inline]
             pub fn len(&self) -> usize {
                 self.map.len()
             }
 
-            #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
             }
@@ -386,7 +367,6 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             type IntoIter = std::collections::hash_map::Values<'a, #key_ty, #ident>;
             type Item = &'a #ident;
 
-            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()
             }
@@ -420,25 +400,25 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         .and_then(|f| Some((f.ident.as_ref()?, &f.ty)))
         .ok_or_else(|| errors::missing_key(input.span()))?;
 
-    let translated = if fields.iter().any(|f| f.is_translated()) {
-        let sql_query = sql_translated_query(input)?;
+    let load_impl = if fields.iter().any(|f| f.is_translated()) {
+        let translated_sql_query = sql_translated_query(input)?;
         let translation_from_row = translation_from_row(input)?;
 
         quote! {
-            let (conn, ctx) = conn
-                .query_fold(#sql_query, #key_name, ctx, |mut ctx, row| {
-                    #translation_from_row
-
-                    if let Some(ctx) = ctx.as_mut_opt() {
-                        translation_from_row(&mut ctx.vec, row)?;
-                    }
-
-                    Ok(ctx)
-                })
-                .await?;
+            flock::for_macros::load_single_key_translate(conn, &mut table.vec, key, #sql_query, #translated_sql_query, |vec, row| {
+                let row = #new_from_row;
+                vec.insert(row.#key_name.into(), row);
+                Ok(vec)
+            }, #translation_from_row).await?
         }
     } else {
-        quote! {}
+        quote! {
+            flock::for_macros::load_single_key(conn, &mut table.vec, key, #sql_query, |vec, row| {
+                let row = #new_from_row;
+                vec.insert(row.#key_name.into(), row);
+                Ok(vec)
+            }).await?
+        }
     };
 
     Ok(quote! {
@@ -448,28 +428,24 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl AsRef<Self> for #table {
-            #[inline]
             fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl flock::AsLock for #table {
-            #[inline]
             fn as_lock() -> &'static flock::Lock<Self> {
                 &#lock
             }
         }
 
         impl flock::AsMutOpt<Self> for #table {
-            #[inline]
             fn as_mut_opt(&mut self) -> Option<&mut Self> {
                 Some(self)
             }
         }
 
         impl flock::EntityBy<#key_ty, #ident> for #table {
-            #[inline(always)]
             fn entity_by(&self, key: #key_ty) -> Option<&#ident> {
                 self.get(key)
             }
@@ -506,14 +482,12 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl flock::SetTag for #table {
-            #[inline]
             fn set_tag(&mut self, tag: flock::version_tag::VersionTag) {
                 self.tag = tag;
             }
         }
 
         impl #table {
-            #[inline]
             pub fn get(&self, #key_name: #key_ty) -> Option<&#ident> {
                 self.vec.get(#key_name.into())
             }
@@ -522,59 +496,30 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.vec.insert(#key_name.into(), value);
             }
 
-            #[inline]
             pub fn is_empty(&self) -> bool {
                 self.vec.is_empty()
             }
 
-            #[inline]
             pub fn iter(&self) -> flock::vec_opt::Iter<#ident> {
                 self.vec.iter()
             }
 
             #[tracing::instrument(name = #load_name, skip(ctx, conn), err)]
-            pub async fn load<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #key_name: Option<#key_ty>) -> flock::Result<(flock::ConnOrFactory, C)>
+            pub async fn load<'a, C>(mut ctx: C, mut conn: flock::ConnOrFactory, key: Option<#key_ty>) -> flock::Result<(flock::ConnOrFactory, C)>
             where
                 C: flock::AsMutOpt<#table> + 'a,
             {
-                if let Some(ctx) = ctx.as_mut_opt() {
-                    if let Some(id) = #key_name {
-                        ctx.vec.remove(id.into());
-                    } else {
-                        ctx.vec.clear();
-                    }
-                } else {
-                    return Ok((conn, ctx));
+                if let Some(table) = ctx.as_mut_opt() {
+                    conn = #load_impl;
                 }
 
-                let (conn, ctx) = conn
-                    .connect()
-                    .await?
-                    .query_fold(#sql_query, #key_name, ctx, Self::load_query_fold)
-                    .await?;
-
-                #translated
-
-                Ok((flock::ConnOrFactory::Connection(conn), ctx))
+                Ok((conn, ctx))
             }
 
-            fn load_query_fold<C>(mut ctx: C, row: &flock::mssql_client::Row) -> flock::mssql_client::Result<C>
-            where
-                C: flock::AsMutOpt<#table>,
-            {
-                if let Some(ctx) = ctx.as_mut_opt() {
-                    let row = #new_from_row;
-                    ctx.vec.insert(row.#key_name.into(), row);
-                }
-                Ok(ctx)
-            }
-
-            #[inline]
             pub fn len(&self) -> usize {
                 self.vec.len()
             }
 
-            #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
             }
@@ -584,7 +529,6 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             type IntoIter = flock::vec_opt::Iter<'a, #ident>;
             type Item = &'a #ident;
 
-            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()
             }
@@ -634,7 +578,7 @@ fn translation_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream>
     errors.result()?;
 
     Ok(quote! {
-        fn translation_from_row(vec: &mut flock::VecOpt<#ident>, row: &flock::mssql_client::Row) -> flock::mssql_client::Result<()> {
+        |vec: &mut flock::VecOpt<#ident>, row: &flock::mssql_client::Row| {
             let key = #key_type::try_get_from_uuid(row.get_named_err(0, #key_name)?);
 
             if let Some(entity) = key.and_then(|key| vec.get_mut(key.into())) {
@@ -642,7 +586,7 @@ fn translation_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream>
                 #fields
             }
 
-            Ok(())
+            Ok(vec)
         }
     })
 }

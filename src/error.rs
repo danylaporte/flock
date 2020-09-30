@@ -25,28 +25,24 @@ impl<E> From<Box<E>> for Error
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    #[inline]
     fn from(e: Box<E>) -> Self {
         Self::Box(e as _)
     }
 }
 
 impl From<mssql_client::Error> for Error {
-    #[inline]
     fn from(e: mssql_client::Error) -> Self {
         Self::MssqlClient(e)
     }
 }
 
 impl From<&'static str> for Error {
-    #[inline]
     fn from(e: &'static str) -> Self {
         Self::Str(e)
     }
 }
 
 impl From<String> for Error {
-    #[inline]
     fn from(e: String) -> Self {
         Self::String(e)
     }

@@ -27,7 +27,10 @@ impl EntityIdSet {
         self.get().insert_full(uuid).0.into()
     }
 
-    pub fn get_uuid(&self, index: usize) -> Option<Uuid> {
-        self.get().get_index(index).cloned()
+    pub fn get_uuid_unchecked(&self, index: usize) -> Uuid {
+        match self.get().get_index(index) {
+            Some(id) => *id,
+            None => panic!("Uuid"),
+        }
     }
 }

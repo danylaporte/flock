@@ -34,28 +34,24 @@ impl<T: SetTag> WriteGuard<T> {
 }
 
 impl<T: SetTag> AsMut<T> for WriteGuard<T> {
-    #[inline]
     fn as_mut(&mut self) -> &mut T {
         self.deref_mut()
     }
 }
 
 impl<T: SetTag> AsMutOpt<T> for WriteGuard<T> {
-    #[inline]
     fn as_mut_opt(&mut self) -> Option<&mut T> {
         self.guard.as_mut()
     }
 }
 
 impl<T: SetTag> AsRef<Option<T>> for WriteGuard<T> {
-    #[inline]
     fn as_ref(&self) -> &Option<T> {
         self.guard.deref()
     }
 }
 
 impl<T: SetTag> AsRef<T> for WriteGuard<T> {
-    #[inline]
     fn as_ref(&self) -> &T {
         self.deref()
     }
