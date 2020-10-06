@@ -1,6 +1,6 @@
 #![feature(proc_macro_hygiene)]
 
-use flock::{locks, Entity, EntityId, Result};
+use flock::{locks, Entity, EntityId, MergeSql, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
 #[derive(EntityId)]
 struct AccountId(u32);
 
-#[derive(Entity)]
+#[derive(Entity, MergeSql)]
 #[table("[dbo].[Accounts]")]
 #[where_clause("[NAME] IS NOT NULL")]
 struct Account {

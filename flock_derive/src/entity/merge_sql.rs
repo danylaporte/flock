@@ -178,7 +178,10 @@ fn merge_execute<'a>(
     );
 
     let sql = LitStr::new(&sql, input.span());
-    let params = quote! { (#(#params,)*) };
+
+    let params = params.chunks(4).fold(quote! {()}, |q, v| {
+        quote! { (#q, #(#v,)*) }
+    });
 
     Ok(quote! { execute(#sql, #params) })
 }

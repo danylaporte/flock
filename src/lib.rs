@@ -77,6 +77,7 @@ pub use lock::Lock;
 pub use many_to_many::ManyToMany;
 pub use merge_sql::MergeSql;
 pub use mssql_client;
+pub use once_cell;
 pub use once_cell::sync::OnceCell;
 pub use one_to_many::OneToMany;
 pub use parking_lot;
