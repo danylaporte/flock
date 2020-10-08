@@ -106,6 +106,15 @@ pub struct Iter<'a, T> {
     len: usize,
 }
 
+impl<'a, T> Clone for Iter<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            iter: self.iter.clone(),
+            len: self.len.clone(),
+        }
+    }
+}
+
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
