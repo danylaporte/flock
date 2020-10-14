@@ -1,8 +1,9 @@
 use super::{DeriveInputExt, Errors, FieldExt, SqlStringExt};
+use inflector::Inflector;
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::iter::once;
-use syn::{spanned::Spanned, DeriveInput, Error, Field, LitStr};
+use syn::{spanned::Spanned, DeriveInput, Error, Field, Ident, LitBool, LitStr};
 
 pub(crate) fn merge(input: &DeriveInput) -> TokenStream {
     try_token_stream!(impl_merge(input))
@@ -39,6 +40,8 @@ fn impl_merge(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         quote! {}
     };
 
+    let test_merge_sql_schema = test_merge_sql_schema(input)?;
+
     Ok(quote! {
         impl flock::MergeSql for #ident {
             fn merge_sql<'a>(
@@ -56,6 +59,8 @@ fn impl_merge(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 })
             }
         }
+
+        #test_merge_sql_schema
     })
 }
 
@@ -184,4 +189,55 @@ fn merge_execute<'a>(
     });
 
     Ok(quote! { execute(#sql, #params) })
+}
+
+fn test_merge_sql_schema(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
+    let fields = input.fields()?;
+    let mut errors = Vec::new();
+    let ident = &input.ident;
+    let table_lit = input.table_lit().map_err(|e| errors.push(e));
+
+    let mut fn_ident = ident.to_string().to_snake_case();
+    fn_ident.insert_str(0, "test_merge_sql_schema_");
+
+    let fn_ident = Ident::new(&fn_ident, input.span());
+
+    let fields = fields.iter().filter_map(|f| {
+        if f.is_translated() {
+            return None;
+        }
+
+        let ident = f.ident().map_err(|e| errors.push(e)).ok()?;
+        let column = f.column().map_err(|e| errors.push(e)).ok()?;
+        let name = LitStr::new(&column.to_lowercase(), f.span());
+        let ty = f.ty();
+
+        let is_key = LitBool {
+            value: f.is_key(),
+            span: ident.span(),
+        };
+
+        Some(quote! {
+            (
+                #name,
+                &<<#ty as FromColumn>::Value as SqlValue>::check_db_ty,
+                Some(<<#ty as FromColumn>::Value as SqlValue>::is_nullable()),
+                #is_key
+            )
+        })
+    });
+
+    let fields = quote! { #(#fields,)* };
+
+    errors.result()?;
+
+    let table = table_lit.expect("table");
+
+    Ok(quote! {
+        #[tokio::test]
+        async fn #fn_ident() {
+            use flock::mssql_client::{FromColumn, SqlValue};
+            flock::tests::test_merge_sql_schema(#table, &[#fields]).await;
+        }
+    })
 }
