@@ -234,6 +234,7 @@ fn test_merge_sql_schema(input: &DeriveInput) -> Result<TokenStream, TokenStream
     let table = table_lit.expect("table");
 
     Ok(quote! {
+        #[cfg(test)]
         #[tokio::test]
         async fn #fn_ident() {
             use flock::mssql_client::{FromColumn, SqlValue};
