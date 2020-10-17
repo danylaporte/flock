@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
 #[derive(EntityId)]
 struct AccountId(u32);
 
-#[derive(Entity, MergeSql)]
+#[derive(Entity)]
 #[table("[dbo].[Accounts]")]
 #[where_clause("[NAME] IS NOT NULL")]
 struct Account {
