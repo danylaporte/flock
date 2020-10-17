@@ -75,6 +75,7 @@ impl<T> Lock<T> {
     }
 }
 
+#[cfg(test)]
 #[tokio::test(flavor = "multi_thread")]
 async fn deadlock_test_read() -> Result<()> {
     use futures03::stream::StreamExt;
