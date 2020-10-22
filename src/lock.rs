@@ -76,7 +76,8 @@ impl<T> Lock<T> {
 }
 
 #[cfg(test)]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
+//#[tokio::test(flavor = "multi_thread")]
 async fn deadlock_test_read() -> Result<()> {
     use futures03::stream::StreamExt;
     use std::time::Duration;
@@ -89,13 +90,16 @@ async fn deadlock_test_read() -> Result<()> {
         stream.push(async move {
             let conn = ConnOrFactory::from_env("DB")?;
             let guard = LOCK.read(conn).await?;
-            tokio::time::sleep(Duration::from_millis(i * 5)).await;
+            tokio::time::delay_for(Duration::from_millis(i * 5)).await;
+            //tokio::time::sleep(Duration::from_millis(i * 5)).await;
             drop(guard);
 
-            tokio::time::sleep(Duration::from_millis(i * 2)).await;
+            //tokio::time::sleep(Duration::from_millis(i * 2)).await;
+            tokio::time::delay_for(Duration::from_millis(i * 2)).await;
 
             let mut guard = LOCK.write_opt().await;
-            tokio::time::sleep(Duration::from_millis(i * 3)).await;
+            tokio::time::delay_for(Duration::from_millis(i * 3)).await;
+            //tokio::time::sleep(Duration::from_millis(i * 3)).await;
             *guard = None;
             Result::<()>::Ok(())
         });
@@ -115,7 +119,8 @@ impl LoadFromSql for MyTestTable {
         conn: ConnOrFactory,
     ) -> futures03::future::LocalBoxFuture<'static, Result<(ConnOrFactory, Self)>> {
         Box::pin(async {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            //tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::time::delay_for(std::time::Duration::from_millis(20)).await;
             Ok((conn, Self))
         })
     }

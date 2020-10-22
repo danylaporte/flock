@@ -1,6 +1,6 @@
-#![feature(proc_macro_hygiene)]
+//#![feature(proc_macro_hygiene)]
 
-use flock::{locks, Entity, EntityId, MergeSql, Result};
+use flock::{locks, Entity, EntityId, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {

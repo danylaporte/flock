@@ -319,7 +319,7 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.map.values()
             }
 
-            #[tracing::instrument(name = #load_name, skip(ctx, conn), err)]
+            #[tracing::instrument(name = #load_name, level = "debug", skip(ctx, conn), err)]
             pub async fn load<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::Result<(flock::ConnOrFactory, C)>
             where
                 C: flock::AsMutOpt<#table> + 'a
@@ -504,7 +504,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.vec.iter()
             }
 
-            #[tracing::instrument(name = #load_name, skip(ctx, conn), err)]
+            #[tracing::instrument(name = #load_name, level = "debug", skip(ctx, conn), err)]
             pub async fn load<'a, C>(mut ctx: C, mut conn: flock::ConnOrFactory, key: Option<#key_ty>) -> flock::Result<(flock::ConnOrFactory, C)>
             where
                 C: flock::AsMutOpt<#table> + 'a,
