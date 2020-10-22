@@ -1,7 +1,6 @@
 use crate::{
-    ConnOrFactory, LoadFromSql, ReadGuard, ReadOptGuard, SetTag, WriteGuard, WriteOptGuard,
+    ConnOrFactory, LoadFromSql, ReadGuard, ReadOptGuard, Result, SetTag, WriteGuard, WriteOptGuard,
 };
-use failure::Error;
 use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
 
@@ -19,7 +18,7 @@ impl<T> Lock<T> {
     pub async fn read(
         &'static self,
         mut conn: ConnOrFactory,
-    ) -> Result<(ConnOrFactory, ReadGuard<T>), Error>
+    ) -> Result<(ConnOrFactory, ReadGuard<T>)>
     where
         T: LoadFromSql,
     {
@@ -53,7 +52,7 @@ impl<T> Lock<T> {
     pub async fn write(
         &'static self,
         mut conn: ConnOrFactory,
-    ) -> Result<(ConnOrFactory, WriteGuard<T>), Error>
+    ) -> Result<(ConnOrFactory, WriteGuard<T>)>
     where
         T: LoadFromSql + SetTag,
     {
@@ -76,8 +75,10 @@ impl<T> Lock<T> {
     }
 }
 
-#[tokio::test(threaded_scheduler)]
-async fn deadlock_test_read() -> Result<(), Error> {
+#[cfg(test)]
+#[tokio::test]
+//#[tokio::test(flavor = "multi_thread")]
+async fn deadlock_test_read() -> Result<()> {
     use futures03::stream::StreamExt;
     use std::time::Duration;
 
@@ -90,14 +91,17 @@ async fn deadlock_test_read() -> Result<(), Error> {
             let conn = ConnOrFactory::from_env("DB")?;
             let guard = LOCK.read(conn).await?;
             tokio::time::delay_for(Duration::from_millis(i * 5)).await;
+            //tokio::time::sleep(Duration::from_millis(i * 5)).await;
             drop(guard);
 
+            //tokio::time::sleep(Duration::from_millis(i * 2)).await;
             tokio::time::delay_for(Duration::from_millis(i * 2)).await;
 
             let mut guard = LOCK.write_opt().await;
             tokio::time::delay_for(Duration::from_millis(i * 3)).await;
+            //tokio::time::sleep(Duration::from_millis(i * 3)).await;
             *guard = None;
-            Result::<(), Error>::Ok(())
+            Result::<()>::Ok(())
         });
     }
 
@@ -113,8 +117,9 @@ struct MyTestTable;
 impl LoadFromSql for MyTestTable {
     fn load_from_sql(
         conn: ConnOrFactory,
-    ) -> futures03::future::LocalBoxFuture<'static, Result<(ConnOrFactory, Self), Error>> {
+    ) -> futures03::future::LocalBoxFuture<'static, Result<(ConnOrFactory, Self)>> {
         Box::pin(async {
+            //tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             tokio::time::delay_for(std::time::Duration::from_millis(20)).await;
             Ok((conn, Self))
         })

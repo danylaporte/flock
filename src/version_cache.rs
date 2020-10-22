@@ -54,12 +54,10 @@ where
 pub struct CacheData<T>(Arc<(T, VersionTag)>);
 
 impl<T> CacheData<T> {
-    #[inline]
     fn new(data: T, tag: VersionTag) -> Self {
         CacheData(Arc::new((data, tag)))
     }
 
-    #[inline]
     pub fn tag(&self) -> VersionTag {
         (self.0).1
     }
@@ -74,7 +72,6 @@ impl<T> Clone for CacheData<T> {
 impl<T> Deref for CacheData<T> {
     type Target = T;
 
-    #[inline]
     fn deref(&self) -> &Self::Target {
         &(self.0).0
     }

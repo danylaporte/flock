@@ -1,17 +1,21 @@
+#[macro_use]
+mod macros;
+
 mod attrs_ext;
 mod derive_input_ext;
 mod errors;
 mod field_ext;
-
-#[macro_use]
-mod macros;
+mod merge_sql;
+mod sql_string_ext;
 
 use derive_input_ext::DeriveInputExt;
 use errors::Errors;
 use field_ext::FieldExt;
 use inflector::Inflector;
+pub(crate) use merge_sql::merge;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
+use sql_string_ext::SqlStringExt;
 use syn::{spanned::Spanned, DeriveInput, Error, Ident, LitBool, LitInt, LitStr};
 
 pub fn generate(input: DeriveInput) -> TokenStream {
@@ -26,7 +30,6 @@ pub fn generate(input: DeriveInput) -> TokenStream {
         #[cfg(test)]
         mod tests {
             use super::*;
-            use flock::tokio;
 
             #test_load
             #test_schema
@@ -40,85 +43,98 @@ fn new_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
     let ident = &input.ident;
     let mut errors = Vec::new();
     let mut idx = 0;
+    let mut instantiate = Vec::with_capacity(fields.len());
 
-    let fields = fields.iter().filter_map(|f| {
-        let ident = f.ident().map_err(|e| errors.push(e)).ok()?;
+    for f in fields {
+        let ident = match f.ident() {
+            Ok(i) => i,
+            Err(e) => {
+                errors.push(e);
+                continue;
+            }
+        };
 
         if f.is_translated() {
-            return Some(quote! { #ident: Default::default() });
+            instantiate.push(quote! { #ident: Default::default(), });
+        } else {
+            let span = ident.span();
+            let index = LitInt::new(&idx.to_string(), span);
+            let name = LitStr::new(&ident.to_string(), span);
+
+            instantiate.push(quote! {
+                #ident: match row.get_named_err(#index, #name) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e)
+                },
+            });
+
+            idx += 1;
         }
-
-        let index = LitInt::new(&idx.to_string(), f.span());
-        let name = LitStr::new(&ident.to_string(), ident.span());
-
-        idx += 1;
-
-        Some(quote! {
-            #ident: row
-                .get(#index)
-                .and_then(flock::mssql_client::FromColumn::from_column)
-                .context(#name)?
-        })
-    });
-
-    let fields = quote! { #(#fields,)* };
+    }
 
     errors.result()?;
-
-    Ok(quote! {
-        fn new_from_row(row: &flock::mssql_client::Row) -> Result<#ident, flock::failure::Error> {
-            Ok(#ident { #fields })
-        }
-    })
+    Ok(quote! { #ident { #(#instantiate)* } })
 }
 
 fn sql_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
     let fields = input.fields()?;
     let mut errors = Vec::new();
+    let mut select = String::with_capacity(1000);
+    let mut wheres = String::with_capacity(250);
+    let mut idx = 1;
 
-    let select = fields
-        .iter()
-        .filter(|f| !f.is_translated())
-        .filter_map(|f| f.column().map_err(|e| errors.push(e)).ok())
-        .map(|v| format!("[{}]", v))
-        .collect::<Vec<_>>()
-        .join(",");
+    for f in fields {
+        if f.is_translated() {
+            continue;
+        }
+
+        let name = match f.column() {
+            Ok(mut n) => {
+                n.insert(0, '[');
+                n.push(']');
+                n
+            }
+            Err(e) => {
+                errors.push(e);
+                continue;
+            }
+        };
+
+        select.add_sep(",").add(&name);
+
+        if f.is_key() {
+            let p = idx.to_string();
+
+            wheres
+                .add_sep(" AND ")
+                .add("(@p")
+                .add(&p)
+                .add(" IS NULL OR @p")
+                .add(&p)
+                .add(" = ")
+                .add(&name)
+                .add(")");
+
+            idx += 1;
+        }
+    }
 
     let table = input.table().map_err(|e| errors.push(e));
-    let where_clause = input.where_clause_attr().map_err(|e| errors.push(e));
+
+    match input.where_clause_attr() {
+        Ok(Some(w)) => {
+            wheres.add_sep(" AND ").add(&w.value());
+        }
+        Ok(None) => {}
+        Err(e) => errors.push(e),
+    }
 
     errors.result()?;
 
     let table = table.expect("table");
-    let where_clause = where_clause.expect("where_clause");
+    let sql = ["SELECT ", &select, " FROM ", &table, " WHERE ", &wheres].concat();
 
-    let where_clause = fields
-        .iter()
-        .filter(|f| f.is_key())
-        .filter_map(|f| f.column().map_err(|e| errors.push(e)).ok())
-        .enumerate()
-        .map(|(i, v)| {
-            format!(
-                "(@p{p} IS NULL OR @p{p} = [{field}])",
-                p = (i + 1),
-                field = v
-            )
-        })
-        .chain(where_clause.into_iter().map(|t| t.value()))
-        .collect::<Vec<_>>()
-        .join(" AND ");
-
-    errors.result()?;
-
-    Ok(LitStr::new(
-        &format!(
-            "SELECT {select} FROM {table} WHERE {where_clause}",
-            select = select,
-            table = table,
-            where_clause = where_clause,
-        ),
-        input.span(),
-    ))
+    Ok(LitStr::new(&sql, input.span()))
 }
 
 fn sql_translated_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
@@ -129,7 +145,11 @@ fn sql_translated_query(input: &DeriveInput) -> Result<LitStr, TokenStream> {
         .iter()
         .filter(|f| f.is_translated())
         .filter_map(|f| f.column().map_err(|e| errors.push(e)).ok())
-        .map(|v| format!("[{}]", v))
+        .map(|mut v| {
+            v.insert(0, '[');
+            v.push(']');
+            v
+        })
         .collect::<Vec<_>>()
         .join(",");
 
@@ -171,8 +191,12 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
     let fields = input.fields()?;
     let lock = Ident::new(&ident_str.to_screaming_snake_case(), ident.span());
     let vis = &input.vis;
-    let context = LitStr::new(&ident_str, ident.span());
     let new_from_row = new_from_row(input)?;
+
+    let mut load_name = table_name.clone();
+    load_name.push_str("::load");
+
+    let load_name = LitStr::new(&load_name, ident.span());
 
     errors::check_entity_must_be_singular(&ident_str, &table_name, ident.span())?;
 
@@ -194,7 +218,8 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         .iter()
         .filter(|f| f.is_key())
         .filter_map(|f| f.ident.as_ref());
-    let key_ident = quote! { (#(#key_ident,)*) };
+    let key_sep_ident = quote! { #(#key_ident,)* };
+    let key_ident = quote! { (#key_sep_ident) };
 
     let key_ty = fields.iter().filter(|f| f.is_key()).map(|f| &f.ty);
     let key_ty = quote! { (#(#key_ty,)*) };
@@ -228,7 +253,6 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         .map(|_| quote! { None });
 
     let keys_none = quote! { #(#keys_none),* };
-
     let sql_query = sql_query(input)?;
 
     Ok(quote! {
@@ -238,116 +262,102 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl AsRef<Self> for #table {
-            #[inline]
             fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl flock::AsLock for #table {
-            #[inline]
             fn as_lock() -> &'static flock::Lock<Self> {
                 &#lock
             }
         }
 
         impl flock::AsMutOpt<Self> for #table {
-            #[inline]
             fn as_mut_opt(&mut self) -> Option<&mut Self> {
                 Some(self)
             }
         }
 
         impl flock::EntityBy<#key_ty, #ident> for #table {
-            #[inline]
             fn entity_by(&self, #key_ident: #key_ty) -> Option<&#ident> {
                 self.map.get(&#key_ident)
             }
         }
 
         impl flock::LoadFromSql for #table {
-            fn load_from_sql(conn: flock::ConnOrFactory) -> flock::futures03::future::LocalBoxFuture<'static, Result<(flock::ConnOrFactory, Self), flock::failure::Error>> {
+            fn load_from_sql(conn: flock::ConnOrFactory) -> flock::futures03::future::LocalBoxFuture<'static, flock::Result<(flock::ConnOrFactory, Self)>> {
                 let table = Self {
                     map: Default::default(),
                     tag: Default::default(),
                 };
 
-                #table::load(table, conn, #keys_none)
+                Box::pin(Self::load(table, conn, #keys_none))
             }
         }
 
         impl flock::SetTag for #table {
-            #[inline]
             fn set_tag(&mut self, tag: flock::version_tag::VersionTag) {
                 self.tag = tag;
             }
         }
 
         impl #table {
-            #[inline]
             pub fn get(&self, #key_ident_ty) -> Option<&#ident> {
                 self.map.get(&#key_ident)
             }
 
-            #[inline]
             pub fn is_empty(&self) -> bool {
                 self.map.is_empty()
             }
 
-            #[inline]
             pub fn insert(&mut self, #key_ident_ty, value: #ident) {
                 self.map.insert(#key_ident, value);
             }
 
-            #[inline]
             pub fn iter(&self) -> std::collections::hash_map::Values<#key_ty, #ident> {
                 self.map.values()
             }
 
-            pub fn load<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::futures03::future::LocalBoxFuture<'a, Result<(flock::ConnOrFactory, C), flock::failure::Error>>
+            #[tracing::instrument(name = #load_name, level = "debug", skip(ctx, conn), err)]
+            pub async fn load<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::Result<(flock::ConnOrFactory, C)>
             where
-                C: flock::AsMutOpt<#table> + 'a,
+                C: flock::AsMutOpt<#table> + 'a
             {
-                use flock::failure::ResultExt;
-
-                #new_from_row
-
-                Box::pin(async move {
-                    if let Some(ctx) = ctx.as_mut_opt() {
-                        if #is_all_keys_none {
-                            ctx.map.clear();
-                        } else {
-                            ctx.map.retain(|keys, _| { #retain_keys })
-                        }
+                if let Some(ctx) = ctx.as_mut_opt() {
+                    if #is_all_keys_none {
+                        ctx.map.clear();
                     } else {
-                        return Ok((conn, ctx));
+                        ctx.map.retain(|keys, _| { #retain_keys });
                     }
+                } else {
+                    return Ok((conn, ctx))
+                }
 
-                    flock::log::trace!("Loading");
-
-                    let (conn, ctx) = conn
-                        .connect()
-                        .await?
-                        .query_fold(#sql_query, #key_ident, ctx, |mut ctx, row| {
-                            if let Some(ctx) = ctx.as_mut_opt() {
-                                let row = new_from_row(row).context(#context)?;
-                                ctx.map.insert(#key_row_clone, row);
-                            }
-                            Ok(ctx)
-                        })
-                        .await?;
-
-                    flock::log::trace!("Loaded");
-                    Ok((flock::ConnOrFactory::Connection(conn), ctx))
-                })
+                match conn.connect().await {
+                    Ok(conn) => match conn.query_fold(#sql_query, #key_ident, ctx, Self::load_query_fold).await {
+                        Ok((conn, ctx)) => Ok((flock::ConnOrFactory::Connection(conn), ctx)),
+                        Err(e) => Err(e.into()),
+                    },
+                    Err(e) => Err(e),
+                }
             }
 
-            #[inline]
+            fn load_query_fold<C>(mut ctx: C, row: &flock::mssql_client::Row) -> flock::mssql_client::Result<C>
+            where
+                C: flock::AsMutOpt<#table>,
+            {
+                if let Some(ctx) = ctx.as_mut_opt() {
+                    let row = #new_from_row;
+                    ctx.map.insert(#key_row_clone, row);
+                }
+                Ok(ctx)
+            }
+
             pub fn len(&self) -> usize {
                 self.map.len()
             }
 
-            #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
             }
@@ -357,7 +367,6 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             type IntoIter = std::collections::hash_map::Values<'a, #key_ty, #ident>;
             type Item = &'a #ident;
 
-            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()
             }
@@ -375,9 +384,13 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
     let fields = input.fields()?;
     let new_from_row = new_from_row(input)?;
     let sql_query = sql_query(input)?;
-    let context = LitStr::new(&ident_str, ident.span());
     let lock = Ident::new(&ident_str.to_screaming_snake_case(), ident.span());
     let vis = &input.vis;
+    let mut load_name = table_name.clone();
+
+    load_name.push_str("::load");
+
+    let load_name = LitStr::new(&load_name, ident.span());
 
     errors::check_entity_must_be_singular(&ident_str, &table_name, ident.span())?;
 
@@ -387,26 +400,25 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         .and_then(|f| Some((f.ident.as_ref()?, &f.ty)))
         .ok_or_else(|| errors::missing_key(input.span()))?;
 
-    let translated = if fields.iter().any(|f| f.is_translated()) {
-        let sql_query = sql_translated_query(input)?;
+    let load_impl = if fields.iter().any(|f| f.is_translated()) {
+        let translated_sql_query = sql_translated_query(input)?;
         let translation_from_row = translation_from_row(input)?;
-        let context = LitStr::new(&format!("{} translated", ident_str), ident.span());
 
         quote! {
-            let (conn, ctx) = conn
-                .query_fold(#sql_query, #key_name, ctx, |mut ctx, row| {
-                    #translation_from_row
-
-                    if let Some(ctx) = ctx.as_mut_opt() {
-                        translation_from_row(&mut ctx.vec, row).context(#context)?;
-                    }
-
-                    Ok(ctx)
-                })
-                .await?;
+            flock::for_macros::load_single_key_translate(conn, &mut table.vec, key, #sql_query, #translated_sql_query, |vec, row| {
+                let row = #new_from_row;
+                vec.insert(row.#key_name.into(), row);
+                Ok(vec)
+            }, #translation_from_row).await?
         }
     } else {
-        quote! {}
+        quote! {
+            flock::for_macros::load_single_key(conn, &mut table.vec, key, #sql_query, |vec, row| {
+                let row = #new_from_row;
+                vec.insert(row.#key_name.into(), row);
+                Ok(vec)
+            }).await?
+        }
     };
 
     Ok(quote! {
@@ -416,53 +428,66 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
 
         impl AsRef<Self> for #table {
-            #[inline]
             fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl flock::AsLock for #table {
-            #[inline]
             fn as_lock() -> &'static flock::Lock<Self> {
                 &#lock
             }
         }
 
         impl flock::AsMutOpt<Self> for #table {
-            #[inline]
             fn as_mut_opt(&mut self) -> Option<&mut Self> {
                 Some(self)
             }
         }
 
         impl flock::EntityBy<#key_ty, #ident> for #table {
-            #[inline(always)]
             fn entity_by(&self, key: #key_ty) -> Option<&#ident> {
-                #table::get(self, key)
+                self.get(key)
             }
         }
 
         impl flock::LoadFromSql for #table {
-            fn load_from_sql(conn: flock::ConnOrFactory) -> flock::futures03::future::LocalBoxFuture<'static, Result<(flock::ConnOrFactory, Self), flock::failure::Error>> {
+            fn load_from_sql(conn: flock::ConnOrFactory) -> flock::futures03::future::LocalBoxFuture<'static, flock::Result<(flock::ConnOrFactory, Self)>> {
                 let table = Self {
                     tag: Default::default(),
                     vec: Default::default(),
                 };
 
-                #table::load(table, conn, None)
+                Box::pin(Self::load(table, conn, None))
+            }
+        }
+
+        impl flock::ResetOrReload<Option<#key_ty>> for #table {
+            fn reset_or_reload(
+                fac: flock::ConnOrFactory,
+                key: Option<#key_ty>,
+            ) -> flock::futures03::future::LocalBoxFuture<'static, flock::Result<flock::ConnOrFactory>>
+            {
+                Box::pin(async move {
+                    let mut guard = <Self as flock::AsLock>::as_lock().write_opt().await;
+
+                    if guard.is_some() {
+                        Ok(Self::load(guard, fac, key).await?.0)
+                    } else {
+                        *guard = None;
+                        Ok(fac)
+                    }
+                })
             }
         }
 
         impl flock::SetTag for #table {
-            #[inline]
             fn set_tag(&mut self, tag: flock::version_tag::VersionTag) {
                 self.tag = tag;
             }
         }
 
         impl #table {
-            #[inline]
             pub fn get(&self, #key_name: #key_ty) -> Option<&#ident> {
                 self.vec.get(#key_name.into())
             }
@@ -471,62 +496,30 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.vec.insert(#key_name.into(), value);
             }
 
-            #[inline]
             pub fn is_empty(&self) -> bool {
                 self.vec.is_empty()
             }
 
-            #[inline]
             pub fn iter(&self) -> flock::vec_opt::Iter<#ident> {
                 self.vec.iter()
             }
 
-            pub fn load<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #key_name: Option<#key_ty>) -> flock::futures03::future::LocalBoxFuture<'a, Result<(flock::ConnOrFactory, C), flock::failure::Error>>
+            #[tracing::instrument(name = #load_name, level = "debug", skip(ctx, conn), err)]
+            pub async fn load<'a, C>(mut ctx: C, mut conn: flock::ConnOrFactory, key: Option<#key_ty>) -> flock::Result<(flock::ConnOrFactory, C)>
             where
                 C: flock::AsMutOpt<#table> + 'a,
             {
-                use flock::failure::ResultExt;
+                if let Some(table) = ctx.as_mut_opt() {
+                    conn = #load_impl;
+                }
 
-                #new_from_row
-
-                Box::pin(async move {
-                    if let Some(ctx) = ctx.as_mut_opt() {
-                        if let Some(id) = #key_name {
-                            ctx.vec.remove(id.into());
-                        } else {
-                            ctx.vec.clear();
-                        }
-                    } else {
-                        return Ok((conn, ctx));
-                    }
-
-                    flock::log::trace!("Loading");
-
-                    let (conn, ctx) = conn
-                        .connect()
-                        .await?
-                        .query_fold(#sql_query, #key_name, ctx, |mut ctx, row| {
-                            if let Some(ctx) = ctx.as_mut_opt() {
-                                let row = new_from_row(row).context(#context)?;
-                                ctx.vec.insert(row.#key_name.into(), row);
-                            }
-                            Ok(ctx)
-                        })
-                        .await?;
-
-                    #translated
-
-                    flock::log::trace!("Loaded");
-                    Ok((flock::ConnOrFactory::Connection(conn), ctx))
-                })
+                Ok((conn, ctx))
             }
 
-            #[inline]
             pub fn len(&self) -> usize {
                 self.vec.len()
             }
 
-            #[inline]
             pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
             }
@@ -536,7 +529,6 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             type IntoIter = flock::vec_opt::Iter<'a, #ident>;
             type Item = &'a #ident;
 
-            #[inline]
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()
             }
@@ -574,9 +566,8 @@ fn translation_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream>
             let name = LitStr::new(&ident.to_string(), ident.span());
 
             Some(quote! {
-                if let Some(v) = row.get(#index).context(#name)? {
-                    let s: &str = flock::mssql_client::FromColumn::from_column(v).context(#name)?;
-                    entity.#ident.set(culture, s);
+                if let Some(v) = row.get_named_err::<Option<&str>>(#index, #name)? {
+                    entity.#ident.set(culture, v);
                 }
             })
         });
@@ -587,17 +578,15 @@ fn translation_from_row(input: &DeriveInput) -> Result<TokenStream, TokenStream>
     errors.result()?;
 
     Ok(quote! {
-        fn translation_from_row(vec: &mut flock::VecOpt<#ident>, row: &flock::mssql_client::Row) -> Result<(), flock::failure::Error> {
-            use flock::failure::ResultExt;
-
-            let key = #key_type::try_get_from_uuid(row.get(0).context(#key_name)?);
+        |vec: &mut flock::VecOpt<#ident>, row: &flock::mssql_client::Row| {
+            let key = #key_type::try_get_from_uuid(row.get_named_err(0, #key_name)?);
 
             if let Some(entity) = key.and_then(|key| vec.get_mut(key.into())) {
-                let culture = row.get::<translation::Culture>(1).context("culture")?;
+                let culture = row.get_named_err::<translation::Culture>(1, "Culture")?;
                 #fields
             }
 
-            Ok(())
+            Ok(vec)
         }
     })
 }
@@ -607,10 +596,10 @@ fn test_load(input: &DeriveInput) -> TokenStream {
     let ident_str = ident.to_string().to_plural();
     let table = Ident::new(&ident_str.to_pascal_case(), ident.span());
 
-    let fn_ident = Ident::new(
-        &format!("test_load_{}", ident_str.to_snake_case()),
-        input.span(),
-    );
+    let mut fn_ident = ident_str.to_snake_case();
+    fn_ident.insert_str(0, "test_load_");
+
+    let fn_ident = Ident::new(&fn_ident, input.span());
 
     quote! {
         #[tokio::test]
@@ -626,10 +615,10 @@ fn test_schema(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
     let ident = &input.ident;
     let table_lit = input.table_lit().map_err(|e| errors.push(e));
 
-    let fn_ident = Ident::new(
-        &format!("test_schema_{}", ident).to_snake_case(),
-        input.span(),
-    );
+    let mut fn_ident = ident.to_string().to_snake_case();
+    fn_ident.insert_str(0, "test_schema_");
+
+    let fn_ident = Ident::new(&fn_ident, input.span());
 
     let fields = fields.iter().filter_map(|f| {
         if f.is_translated() {

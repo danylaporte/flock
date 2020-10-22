@@ -52,7 +52,6 @@ pub fn generate(input: ItemTrait) -> TokenStream {
             #[cfg(test)]
             mod relation_tests {
                 use super::*;
-                use flock::tokio;
 
                 #(#tests)*
             }
@@ -135,14 +134,12 @@ fn relation(f: &TraitItemMethod) -> RelationData {
             impl std::ops::Deref for #relation {
                 type Target = #relation_ty;
 
-                #[inline]
                 fn deref(&self) -> &Self::Target {
                     &*self.0
                 }
             }
 
             impl<L> From<L> for #relation where L: #wheres {
-                #[inline]
                 fn from(locks: L) -> Self {
                     Self::new(#as_refs)
                 }
@@ -155,7 +152,6 @@ fn relation(f: &TraitItemMethod) -> RelationData {
                     Self(#static_ident.get_or_init(|| #body, &[#tags]))
                 }
 
-                #[inline]
                 pub fn tag(&self) -> flock::version_tag::VersionTag {
                     (self.0).tag()
                 }
@@ -163,7 +159,7 @@ fn relation(f: &TraitItemMethod) -> RelationData {
         },
         test: quote! {
             #[tokio::test]
-            async fn #ident() -> Result<(), flock::failure::Error> {
+            async fn #ident() -> flock::Result<()> {
                 flock::locks_await! {
                     read: [#locks_await]
                 }
@@ -193,12 +189,10 @@ fn relation_methods(ty: &Type) -> TokenStream {
         );
 
         quote! {
-            #[inline]
             pub fn #left_ids_by(&self, id: #right) -> flock::iter::ManyIter<#left> {
                 (self.0).iter_left_by(id)
             }
 
-            #[inline]
             pub fn #right_ids_by(&self, id: #left) -> flock::iter::ManyIter<#right> {
                 (self.0).iter_right_by(id)
             }
@@ -213,7 +207,6 @@ fn relation_methods(ty: &Type) -> TokenStream {
         );
 
         quote! {
-            #[inline]
             pub fn #many_ids_by(&self, id: #one) -> flock::iter::ManyIter<#many> {
                 (self.0).iter_by(id)
             }
