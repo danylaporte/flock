@@ -76,6 +76,15 @@ pub struct OneIter<'a, ONE, MANY> {
     _one: PhantomData<ONE>,
 }
 
+impl<'a, ONE, MANY> Clone for OneIter<'a, ONE, MANY> {
+    fn clone(&self) -> Self {
+        Self {
+            iter: self.iter.clone(),
+            _one: PhantomData,
+        }
+    }
+}
+
 impl<'a, ONE, MANY> OneIter<'a, ONE, MANY>
 where
     ONE: From<usize>,

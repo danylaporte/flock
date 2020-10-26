@@ -44,6 +44,12 @@ impl<'a, MANY> ManyIter<'a, MANY> {
     }
 }
 
+impl<'a, MANY> Clone for ManyIter<'a, MANY> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 impl<'a, MANY> Iterator for ManyIter<'a, MANY>
 where
     MANY: Clone,
