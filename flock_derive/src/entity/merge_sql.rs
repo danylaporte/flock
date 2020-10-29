@@ -32,7 +32,7 @@ fn impl_merge(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         let execute = merge_execute(&input, fields, &table.value())?;
 
         quote! {
-            for culture in Culture::iter() {
+            for &culture in &Culture::DB_CULTURES {
                 trans = trans.#execute.await?;
             }
         }
