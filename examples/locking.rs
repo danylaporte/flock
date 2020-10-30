@@ -1,5 +1,3 @@
-#![feature(proc_macro_hygiene)]
-
 use flock::{
     futures03::future::LocalBoxFuture, locks, version_tag::VersionTag, AsLock, ConnOrFactory,
     LoadFromSql, Lock, Result, SetTag,

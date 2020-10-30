@@ -31,8 +31,6 @@
 //! }
 //! ```
 
-#![feature(const_fn)]
-
 mod as_lock;
 mod as_mut_opt;
 mod as_mut_opt_wrapper;

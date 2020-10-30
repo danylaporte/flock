@@ -1,5 +1,3 @@
-#![feature(proc_macro_hygiene)]
-
 use flock::{locks, Entity, EntityId, Result};
 
 #[tokio::main]

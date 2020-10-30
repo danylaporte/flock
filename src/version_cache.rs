@@ -4,12 +4,9 @@ use std::{cell::Cell, ops::Deref, sync::Arc};
 use thread_local::CachedThreadLocal;
 use version_tag::{combine, VersionTag};
 
-pub struct VersionCache<T: Send + Sync>(OnceCell<(RwLock<Option<CacheData<T>>>, ReentrencyCheck)>);
+pub struct VersionCache<T>(OnceCell<(RwLock<Option<CacheData<T>>>, ReentrencyCheck)>);
 
-impl<T> VersionCache<T>
-where
-    T: Send + Sync,
-{
+impl<T> VersionCache<T> {
     pub const fn new() -> Self {
         Self(OnceCell::new())
     }
