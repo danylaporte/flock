@@ -132,7 +132,10 @@ pub fn locks_await(item: TokenStream) -> TokenStream {
 ///     name: String,
 /// }
 /// ```
-#[proc_macro_derive(MergeSql, attributes(column, key, table, translated))]
+#[proc_macro_derive(
+    MergeSql,
+    attributes(column, key, identity, reload_on_write, table, translated)
+)]
 pub fn merge_sql(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     entity::merge(&input).into()

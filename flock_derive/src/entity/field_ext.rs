@@ -21,6 +21,13 @@ pub trait FieldExt {
         })
     }
 
+    fn is_identity(&self) -> bool {
+        self.field()
+            .attrs
+            .iter()
+            .any(|a| a.path.is_ident("identity"))
+    }
+
     fn is_key(&self) -> bool {
         self.field().attrs.iter().any(|a| a.path.is_ident("key"))
     }

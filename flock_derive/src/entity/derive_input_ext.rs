@@ -17,6 +17,13 @@ pub trait DeriveInputExt {
         }
     }
 
+    fn reload_on_write(&self) -> bool {
+        self.input()
+            .attrs
+            .iter()
+            .any(|a| a.path.is_ident("reload_on_write"))
+    }
+
     fn row_type(&self) -> Result<Type, TokenStream> {
         let input = self.input();
 
