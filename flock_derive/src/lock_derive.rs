@@ -35,6 +35,7 @@ fn derive(args: Args) -> TokenStream {
     let as_muts = impl_as_muts(&args);
     let as_refs = impl_as_refs(&args);
     let locks = impl_struct(&args);
+    let locks_impl = impl_struct_impl(&args);
     let locks_fut = locks_fut(&args);
 
     let dir = config_dir();
@@ -56,6 +57,7 @@ fn derive(args: Args) -> TokenStream {
 
     quote!(
         #locks
+        #locks_impl
         #dir
         #as_muts
         #as_refs
@@ -277,6 +279,27 @@ fn impl_struct(args: &Args) -> TokenStream {
     quote! {
         struct Locks {
             #(#fields,)*
+        }
+    }
+}
+
+fn impl_struct_impl(args: &Args) -> TokenStream {
+    let fields = args.fields.iter().map(|f| {
+        let n = &f.member;
+
+        match f.access {
+            Access::Read => quote! { self.#n.tag() },
+            Access::ReadOpt => quote! { (&*self.#n).as_ref()?.tag()  },
+            Access::Write => quote! { self.#n.tag() },
+            Access::WriteOpt => quote! { (&*self.#n).as_ref()?.tag() },
+        }
+    });
+
+    quote! {
+        impl Locks {
+            pub fn tag(&self) -> Option<flock::version_tag::VersionTag> {
+                Some(flock::version_tag::combine(&[#(#fields,)*]))
+            }
         }
     }
 }
