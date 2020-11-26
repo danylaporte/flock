@@ -87,6 +87,73 @@ pub async fn test_schema(table: &str, fields: &[(&str, &dyn Fn(&str) -> bool, Is
     }
 }
 
+pub async fn test_delete_sql_schema(table: &str, fields: &[(&str, &dyn Fn(&str) -> bool, IsNull)]) {
+    let conn = Connection::from_env("DB").await.expect("Connection");
+
+    const SQL: &str = r#"SELECT
+        c.COLUMN_NAME,
+        c.DATA_TYPE,
+        CAST(CASE c.IS_NULLABLE WHEN 'YES' THEN 1 ELSE 0 END AS BIT) IS_NULLABLE
+    FROM
+        INFORMATION_SCHEMA.TABLES t
+        INNER JOIN INFORMATION_SCHEMA.COLUMNS c
+        ON t.TABLE_NAME = c.TABLE_NAME
+        AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
+    WHERE
+        @p1 = '[' + t.TABLE_SCHEMA + '].[' + t.TABLE_NAME + ']'
+    "#;
+
+    let mut rows: Vec<DeleteSqlRow> = conn.query(SQL, table).await.expect("Query").1;
+
+    // make all field name lowercase for comparison
+    rows.iter_mut()
+        .for_each(|r| r.column_name = r.column_name.to_lowercase());
+
+    if rows.len() == 0 {
+        panic!("Table `{}` not found.", table);
+    }
+
+    for &(ref f_name, ref f_type, f_null) in fields {
+        let r = rows
+            .iter()
+            .find(|r| f_name == &r.column_name)
+            .unwrap_or_else(|| panic!("`{}` not found.", f_name));
+
+        if !f_type(&r.data_type) {
+            panic!("`{}` type invalid.", f_name);
+        }
+
+        let f_null = f_null.unwrap_or(r.is_nullable);
+
+        if r.is_nullable && !f_null {
+            panic!("`{}` is nullable.", f_name);
+        }
+
+        if f_null && !r.is_nullable {
+            panic!("`{}` is not nullable.", f_name);
+        }
+    }
+}
+
+struct DeleteSqlRow {
+    column_name: String,
+    data_type: String,
+    is_nullable: bool,
+}
+
+impl FromRow for DeleteSqlRow {
+    fn from_row(row: &mssql_client::Row) -> mssql_client::Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self {
+            column_name: row.get(0)?,
+            data_type: row.get(1)?,
+            is_nullable: row.get(2)?,
+        })
+    }
+}
+
 pub async fn test_merge_sql_schema(
     table: &str,
     fields: &[(&str, &dyn Fn(&str) -> bool, IsNull, IsKey, IsIdentity)],

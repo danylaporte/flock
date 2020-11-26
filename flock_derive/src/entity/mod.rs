@@ -2,12 +2,14 @@
 mod macros;
 
 mod attrs_ext;
+mod delete_sql;
 mod derive_input_ext;
 mod errors;
 mod field_ext;
 mod merge_sql;
 mod sql_string_ext;
 
+pub(crate) use delete_sql::delete;
 use derive_input_ext::DeriveInputExt;
 use errors::Errors;
 use field_ext::FieldExt;

@@ -8,6 +8,12 @@ mod entity_id;
 mod lock_derive;
 mod relations;
 
+#[proc_macro_derive(DeleteSql, attributes(column, key, table, translated))]
+pub fn delete_sql(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    entity::delete(&input).into()
+}
+
 /// Turn a struct into an entity, implementing the load from the db and
 /// creating a table for storing it.
 ///
