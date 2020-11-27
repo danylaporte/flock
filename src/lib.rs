@@ -2,12 +2,12 @@
 //!
 //! A framework for integrating in memory mssql entities.
 //!
-//! ## Merge sql macros
+//! ## MergeSql and DeleteSql macros
 //!
 //! ```no_run
-//! use flock::{MergeSql, Result, mssql_client::Connection};
+//! use flock::{DeleteSql, MergeSql, Result, mssql_client::Connection};
 //!
-//! #[derive(MergeSql)]
+//! #[derive(DeleteSql, MergeSql)]
 //! #[table("[dbo].[#User]")]
 //! struct User {
 //!    #[key]
@@ -21,12 +21,13 @@
 //!     let conn = conn.execute("CREATE TABLE #User (Id INT, name VARCHAR(50))", ()).await?;
 //!     let trans = conn.transaction().await?;
 //!
-//!     let new_user = User {
+//!     let mut new_user = User {
 //!         id: 1,
 //!         name: "A new user".to_string(),
 //!     };
 //!     
-//!     let _trans = new_user.merge_sql(trans).await?;
+//!     let trans = new_user.merge_sql(trans).await?;
+//!     let _trans = new_user.delete_sql(trans).await?;
 //!     Ok(())
 //! }
 //! ```

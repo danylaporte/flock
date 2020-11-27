@@ -37,8 +37,8 @@ fn impl_delete(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             >
             {
                 Box::pin(async move {
-                    #standard
                     #translated
+                    #standard
                     Ok(trans)
                 })
             }

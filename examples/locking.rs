@@ -22,6 +22,12 @@ async fn main() -> Result<()> {
 
 pub struct Accounts;
 
+impl Accounts {
+    pub fn tag(&self) -> VersionTag {
+        VersionTag::zero()
+    }
+}
+
 impl AsLock for Accounts {
     fn as_lock() -> &'static Lock<Self> {
         unimplemented!()
