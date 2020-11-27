@@ -1,6 +1,6 @@
 [package]
 name = "flock"
-version = "0.11.6-alpha.0"
+version = "0.11.6"
 authors = ["Dany Laporte <dany_laporte@hotmail.com>"]
 edition = "2018"
 publish = false
