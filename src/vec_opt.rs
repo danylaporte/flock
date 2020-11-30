@@ -47,20 +47,24 @@ impl<T> VecOpt<T> {
         self.len
     }
 
-    pub fn remove(&mut self, idx: usize) {
-        if self
+    pub fn remove(&mut self, idx: usize) -> Option<T> {
+        let o = self
             .vec
             .get_mut(idx)
-            .and_then(|v| replace(v, None))
-            .is_some()
-        {
+            .and_then(|v| replace(v, None));
+
+        if o.is_some() {
             self.len -= 1;
         }
+
+        o
     }
 
     pub(crate) fn remove_or_clear(&mut self, idx: Option<usize>) {
         match idx {
-            Some(idx) => self.remove(idx),
+            Some(idx) => {
+                self.remove(idx);
+            }
             None => self.clear(),
         }
     }

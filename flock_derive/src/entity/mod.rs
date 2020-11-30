@@ -360,6 +360,10 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.map.len()
             }
 
+            pub fn remove(&mut self, #key_ident_ty) -> Option<#ident> {
+                self.map.remove(&#key_ident)
+            }
+
             pub fn tag(&self) -> flock::version_tag::VersionTag {
                 self.tag
             }
@@ -520,6 +524,10 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
 
             pub fn len(&self) -> usize {
                 self.vec.len()
+            }
+
+            pub fn remove(&mut self, #key_name: #key_ty) -> Option<#ident> {
+                self.vec.remove(#key_name.into())
             }
 
             pub fn tag(&self) -> flock::version_tag::VersionTag {
