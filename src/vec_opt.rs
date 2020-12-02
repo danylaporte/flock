@@ -48,7 +48,7 @@ impl<T> VecOpt<T> {
     }
 
     pub fn remove(&mut self, idx: usize) -> Option<T> {
-        if idx <= self.vec.len() {
+        if idx < self.vec.len() {
             let o = self.vec.get_mut(idx).and_then(|v| replace(v, None));
 
             if o.is_some() {
