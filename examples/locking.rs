@@ -6,16 +6,20 @@ use flock::{
 #[tokio::main]
 async fn main() -> Result<()> {
     {
-        let _locks = locks!(read: [Accounts]).await?;
+        locks!(L, read: [Accounts]);
+        L::lock().await?;
     }
     {
-        let _locks = locks!(read_opt: [Accounts]).await?;
+        locks!(L, read_opt: [Accounts]);
+        L::lock().await?;
     }
     {
-        let _locks = locks!(write: [Accounts]).await?;
+        locks!(L, write: [Accounts]);
+        L::lock().await?;
     }
     {
-        let _locks = locks!(write_opt: [Accounts]).await?;
+        locks!(L, write_opt: [Accounts]);
+        L::lock().await?;
     }
     Ok(())
 }

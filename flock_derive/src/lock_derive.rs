@@ -1,9 +1,12 @@
 use either::Either;
 use inflector::Inflector;
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use std::collections::hash_map::{Entry, HashMap};
 use std::path::PathBuf;
+use std::{
+    collections::hash_map::{Entry, HashMap},
+    ops::Deref,
+};
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -13,20 +16,22 @@ type Config = HashMap<String, Vec<Type>>;
 
 pub fn locks(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let args = parse_macro_input!(item as Args);
-    let t = derive(args);
-    quote!({
-        #t
-        future
-    })
-    .into()
+    derive(args).into()
 }
 
 pub fn locks_await(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let args = parse_macro_input!(item as Args);
+    let fields = parse_macro_input!(item as Fields);
+
+    let args = Args {
+        name: Ident::new("Locks", fields.span),
+        fields,
+    };
+
     let t = derive(args);
+
     quote!(
         #t
-        let locks = future.await?;
+        let locks = Locks::lock().await?;
     )
     .into()
 }
@@ -35,9 +40,14 @@ fn derive(args: Args) -> TokenStream {
     let as_muts = impl_as_muts(&args);
     let as_refs = impl_as_refs(&args);
     let locks = impl_struct(&args);
-    let locks_impl = impl_struct_impl(&args);
-    let locks_fut = locks_fut(&args);
+    let impl_tag_method = impl_tag_method(&args);
+    let impl_lock_method = impl_lock_method(&args);
 
+    let include_name = format!(
+        "_INCLUDE_{}",
+        args.name.to_string().to_screaming_snake_case()
+    );
+    let include_name = Ident::new(&include_name, args.name.span());
     let dir = config_dir();
 
     let dir = if let Some(dir) = dir {
@@ -50,19 +60,18 @@ fn derive(args: Args) -> TokenStream {
                 .expect("field"),
         );
 
-        quote! { include_str!(#dir); }
+        quote! { const #include_name: &'static [u8] = include_bytes!(#dir); }
     } else {
         quote! {}
     };
 
     quote!(
         #locks
-        #locks_impl
+        #impl_lock_method
+        #impl_tag_method
         #dir
         #as_muts
         #as_refs
-
-        let future = async { #locks_fut };
     )
 }
 
@@ -117,6 +126,15 @@ enum Access {
     WriteOpt,
 }
 
+impl Access {
+    fn is_opt(self) -> bool {
+        match self {
+            Self::Read | Self::Write => false,
+            Self::ReadOpt | Self::WriteOpt => true,
+        }
+    }
+}
+
 impl std::ops::AddAssign for Access {
     fn add_assign(&mut self, rhs: Self) {
         let o = match (*self, rhs) {
@@ -154,19 +172,46 @@ impl Parse for Access {
 }
 
 struct Args {
-    fields: Vec<Field>,
-}
-
-fn ty_to_string(t: &Type) -> String {
-    quote!(#t).to_string()
+    fields: Fields,
+    name: Ident,
 }
 
 impl Parse for Args {
     fn parse(stream: ParseStream) -> Result<Self> {
+        let name = stream.parse()?;
+        let _: Token![,] = stream.parse()?;
+
+        Ok(Self {
+            name,
+            fields: stream.parse()?,
+        })
+    }
+}
+
+struct Fields {
+    fields: Vec<Field>,
+    span: Span,
+}
+
+impl Deref for Fields {
+    type Target = Vec<Field>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl Parse for Fields {
+    fn parse(stream: ParseStream) -> Result<Self> {
         let mut set = HashMap::new();
         let config = load_config();
+        let span = stream.span();
 
         while !stream.is_empty() {
+            if !set.is_empty() {
+                let _: Token![,] = stream.parse()?;
+            }
+
             let access: Access = stream.parse()?;
             let _: Token![:] = stream.parse()?;
 
@@ -206,8 +251,12 @@ impl Parse for Args {
         let mut fields = set.into_iter().map(|(_, v)| v).collect::<Vec<_>>();
         fields.sort_unstable_by(|a, b| a.member.cmp(&b.member));
 
-        Ok(Self { fields })
+        Ok(Self { fields, span })
     }
+}
+
+fn ty_to_string(t: &Type) -> String {
+    quote!(#t).to_string()
 }
 
 struct Field {
@@ -216,7 +265,7 @@ struct Field {
     ty: Type,
 }
 
-fn locks_fut(args: &Args) -> TokenStream {
+fn impl_lock_method(args: &Args) -> TokenStream {
     let resolve_guards = args.fields.iter().map(|f| {
         //let t = &f.ty;
         let n = &f.member;
@@ -252,14 +301,26 @@ fn locks_fut(args: &Args) -> TokenStream {
         quote! { #n: #n }
     });
 
+    let name = &args.name;
+
     quote! {
-        let conn = flock::ConnOrFactory::from_env("DB")?;
+        impl #name {
+            pub async fn lock() -> flock::Result<Self> {
+                let conn = flock::ConnOrFactory::from_env("DB")?;
 
-        #(#resolve_guards)*
+                #(#resolve_guards)*
 
-        flock::Result::<_>::Ok(Locks {
-            #(#fields,)*
-        })
+                Ok(Self {
+                    #(#fields,)*
+                })
+            }
+        }
+
+        impl flock::DoLock for #name {
+            fn do_lock() -> flock::futures03::future::LocalBoxFuture<'static, flock::Result<Self>> {
+                Box::pin(Self::lock())
+            }
+        }
     }
 }
 
@@ -276,14 +337,18 @@ fn impl_struct(args: &Args) -> TokenStream {
         }
     });
 
+    let name = &args.name;
+
     quote! {
-        struct Locks {
+        struct #name {
             #(#fields,)*
         }
     }
 }
 
-fn impl_struct_impl(args: &Args) -> TokenStream {
+fn impl_tag_method(args: &Args) -> TokenStream {
+    let name = &args.name;
+
     let fields = args.fields.iter().map(|f| {
         let n = &f.member;
 
@@ -295,16 +360,34 @@ fn impl_struct_impl(args: &Args) -> TokenStream {
         }
     });
 
-    quote! {
-        impl Locks {
-            pub fn tag(&self) -> Option<flock::version_tag::VersionTag> {
-                Some(flock::version_tag::combine(&[#(#fields,)*]))
+    if args.fields.iter().any(|f| f.access.is_opt()) {
+        quote! {
+            // impl #name {
+            //     pub fn tag(&self) -> Option<flock::version_tag::VersionTag> {
+            //         Some(flock::version_tag::combine(&[#(#fields,)*]))
+            //     }
+            // }
+        }
+    } else {
+        quote! {
+            impl #name {
+                pub fn tag(&self) -> flock::version_tag::VersionTag {
+                    flock::version_tag::combine(&[#(#fields,)*])
+                }
+            }
+
+            impl From<&#name> for flock::version_tag::VersionTag {
+                fn from(l: &#name) -> Self {
+                    l.tag()
+                }
             }
         }
     }
 }
 
 fn impl_as_muts(args: &Args) -> TokenStream {
+    let name = &args.name;
+
     let fields = args.fields.iter().filter_map(|f| {
         let t = &f.ty;
         let n = &f.member;
@@ -312,26 +395,20 @@ fn impl_as_muts(args: &Args) -> TokenStream {
         match f.access {
             Access::Read | Access::ReadOpt => None,
             Access::Write => Some(quote! {
-                impl AsMut<#t> for Locks {
+                impl AsMut<#t> for #name {
                     fn as_mut(&mut self) -> &mut #t {
                         &mut self.#n
                     }
                 }
-
-                // impl flock::AsMutOpt<#t> for Locks {
-                //     fn as_mut_opt(&mut self) -> Option<&mut #t> {
-                //         self.#n.as_mut_opt()
-                //     }
-                // }
             }),
             Access::WriteOpt => Some(quote! {
-                impl AsMut<Option<#t>> for Locks {
+                impl AsMut<Option<#t>> for #name {
                     fn as_mut(&mut self) -> &mut Option<#t> {
                         &mut self.#n
                     }
                 }
 
-                impl flock::AsMutOpt<#t> for Locks {
+                impl flock::AsMutOpt<#t> for #name {
                     fn as_mut_opt(&mut self) -> Option<&mut #t> {
                         self.#n.as_mut_opt()
                     }
@@ -344,26 +421,22 @@ fn impl_as_muts(args: &Args) -> TokenStream {
 }
 
 fn impl_as_refs(args: &Args) -> TokenStream {
+    let name = &args.name;
+
     let fields = args.fields.iter().map(|f| {
         let t = &f.ty;
         let n = &f.member;
 
         match f.access {
             Access::Read | Access::Write => quote! {
-                impl AsRef<#t> for Locks {
+                impl AsRef<#t> for #name {
                     fn as_ref(&self) -> &#t {
                         &self.#n
                     }
                 }
-
-                // impl AsRef<Option<#t>> for Locks {
-                //     fn as_ref(&self) -> &Option<#t> {
-                //         self.#n.as_ref()
-                //     }
-                // }
             },
             Access::ReadOpt | Access::WriteOpt => quote! {
-                impl AsRef<Option<#t>> for Locks {
+                impl AsRef<Option<#t>> for #name {
                     fn as_ref(&self) -> &Option<#t> {
                         &self.#n
                     }

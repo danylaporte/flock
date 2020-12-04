@@ -1,8 +1,8 @@
-use flock::{locks, Entity, EntityId, Result};
+use flock::{locks_await, Entity, EntityId, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let locks = locks!(read: [Accounts]).await?;
+    locks_await!(read: [Accounts]);
 
     locks
         .accounts
