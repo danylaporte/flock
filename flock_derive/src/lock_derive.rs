@@ -76,11 +76,9 @@ fn derive(args: Args) -> TokenStream {
 }
 
 fn config_dir() -> Option<PathBuf> {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR")
-        .replace("\\", "/");
-
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok()?.replace("\\", "/");
     let mut p = PathBuf::from(manifest_dir);
+
     p.set_file_name("lock_derive.toml");
 
     if p.exists() {
