@@ -411,7 +411,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         let translation_from_row = translation_from_row(input)?;
 
         quote! {
-            flock::for_macros::load_single_key_translate(conn, &mut table.vec, key, #sql_query, #translated_sql_query, |vec, row| {
+            flock::for_macros::load_single_key_translate(conn, &mut self.vec, key, #sql_query, #translated_sql_query, |vec, row| {
                 let row = #new_from_row;
                 vec.insert(row.#key_name.into(), row);
                 Ok(vec)
@@ -419,7 +419,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
         }
     } else {
         quote! {
-            flock::for_macros::load_single_key(conn, &mut table.vec, key, #sql_query, |vec, row| {
+            flock::for_macros::load_single_key(conn, &mut self.vec, key, #sql_query, |vec, row| {
                 let row = #new_from_row;
                 vec.insert(row.#key_name.into(), row);
                 Ok(vec)
@@ -459,12 +459,16 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
 
         impl flock::LoadFromSql for #table {
             fn load_from_sql(conn: flock::ConnOrFactory) -> flock::futures03::future::LocalBoxFuture<'static, flock::Result<(flock::ConnOrFactory, Self)>> {
-                let table = Self {
-                    tag: Default::default(),
-                    vec: Default::default(),
-                };
+                Box::pin(async move {
+                    let mut table = Self {
+                        tag: Default::default(),
+                        vec: Default::default(),
+                    };
 
-                Box::pin(Self::load(table, conn, None))
+                    let conn = table.load(conn, None).await?;
+
+                    Ok((conn, table))
+                })
             }
         }
 
@@ -476,12 +480,12 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
             {
                 Box::pin(async move {
                     let mut guard = <Self as flock::AsLock>::as_lock().write_opt().await;
-
-                    if guard.is_some() {
-                        Ok(Self::load(guard, fac, key).await?.0)
-                    } else {
-                        *guard = None;
-                        Ok(fac)
+                    match guard.as_mut() {
+                        Some(t) => Ok(t.load(fac, key).await?),
+                        None => {
+                            *guard = None;
+                            Ok(fac)
+                        }
                     }
                 })
             }
@@ -510,16 +514,9 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.vec.iter()
             }
 
-            #[tracing::instrument(name = #load_name, level = "debug", skip(ctx, conn), err)]
-            pub async fn load<'a, C>(mut ctx: C, mut conn: flock::ConnOrFactory, key: Option<#key_ty>) -> flock::Result<(flock::ConnOrFactory, C)>
-            where
-                C: flock::AsMutOpt<#table> + 'a,
-            {
-                if let Some(table) = ctx.as_mut_opt() {
-                    conn = #load_impl;
-                }
-
-                Ok((conn, ctx))
+            #[tracing::instrument(name = #load_name, level = "debug", skip(self, conn), err)]
+            pub async fn load(&mut self, mut conn: flock::ConnOrFactory, key: Option<#key_ty>) -> flock::Result<flock::ConnOrFactory> {
+                Ok(#load_impl)
             }
 
             pub fn len(&self) -> usize {
