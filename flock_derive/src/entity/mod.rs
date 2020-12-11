@@ -289,12 +289,15 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
 
         impl flock::LoadFromSql for #table {
             fn load_from_sql(conn: flock::ConnOrFactory) -> flock::futures03::future::LocalBoxFuture<'static, flock::Result<(flock::ConnOrFactory, Self)>> {
-                let table = Self {
-                    map: Default::default(),
-                    tag: Default::default(),
-                };
+                Box::pin(async move {
+                    let mut table = Self {
+                        map: Default::default(),
+                        tag: Default::default(),
+                    };
 
-                Box::pin(Self::load(table, conn, #keys_none))
+                    let conn = table.load(conn, #keys_none).await?;
+                    Ok((conn, table))
+                })
             }
         }
 
@@ -321,39 +324,27 @@ fn table_multi_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                 self.map.values()
             }
 
-            #[tracing::instrument(name = #load_name, level = "debug", skip(ctx, conn), err)]
-            pub async fn load<'a, C>(mut ctx: C, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::Result<(flock::ConnOrFactory, C)>
-            where
-                C: flock::AsMutOpt<#table> + 'a
-            {
-                if let Some(ctx) = ctx.as_mut_opt() {
-                    if #is_all_keys_none {
-                        ctx.map.clear();
-                    } else {
-                        ctx.map.retain(|keys, _| { #retain_keys });
-                    }
+            #[tracing::instrument(name = #load_name, level = "debug", skip(self, conn), err)]
+            pub async fn load(&mut self, conn: flock::ConnOrFactory, #keys_ident_opt_ty) -> flock::Result<flock::ConnOrFactory> {
+                if #is_all_keys_none {
+                    self.map.clear();
                 } else {
-                    return Ok((conn, ctx))
+                    self.map.retain(|keys, _| { #retain_keys });
                 }
 
                 match conn.connect().await {
-                    Ok(conn) => match conn.query_fold(#sql_query, #key_ident, ctx, Self::load_query_fold).await {
-                        Ok((conn, ctx)) => Ok((flock::ConnOrFactory::Connection(conn), ctx)),
+                    Ok(conn) => match conn.query_fold(#sql_query, #key_ident, self, Self::load_query_fold).await {
+                        Ok((conn, _)) => Ok(conn.into()),
                         Err(e) => Err(e.into()),
                     },
                     Err(e) => Err(e),
                 }
             }
 
-            fn load_query_fold<C>(mut ctx: C, row: &flock::mssql_client::Row) -> flock::mssql_client::Result<C>
-            where
-                C: flock::AsMutOpt<#table>,
-            {
-                if let Some(ctx) = ctx.as_mut_opt() {
-                    let row = #new_from_row;
-                    ctx.map.insert(#key_row_clone, row);
-                }
-                Ok(ctx)
+            fn load_query_fold<'a>(this: &'a mut Self, row: &flock::mssql_client::Row) -> flock::mssql_client::Result<&'a mut Self> {
+                let row = #new_from_row;
+                this.map.insert(#key_row_clone, row);
+                Ok(this)
             }
 
             pub fn len(&self) -> usize {
@@ -482,10 +473,7 @@ fn table_single_key(input: &DeriveInput) -> Result<TokenStream, TokenStream> {
                     let mut guard = <Self as flock::AsLock>::as_lock().write_opt().await;
                     match guard.as_mut() {
                         Some(t) => Ok(t.load(fac, key).await?),
-                        None => {
-                            *guard = None;
-                            Ok(fac)
-                        }
+                        None => Ok(fac),
                     }
                 })
             }
