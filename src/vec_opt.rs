@@ -1,7 +1,5 @@
 use std::{iter::FromIterator, mem::replace};
 
-use tracing::instrument;
-
 pub struct VecOpt<T> {
     vec: Vec<Option<T>>,
     len: usize,
@@ -49,27 +47,14 @@ impl<T> VecOpt<T> {
         self.len
     }
 
-    #[instrument(skip(self))]
     pub fn remove(&mut self, idx: usize) -> Option<T> {
-        tracing::info!("get_mut {}", idx);
-
         let item = self.vec.get_mut(idx)?;
-
-        tracing::info!("slot found");
-
         let v = replace(item, None);
 
-        tracing::info!("memory replaced");
-
         if v.is_some() {
-            tracing::info!("slot contains something");
             self.len -= 1;
-            tracing::info!("len substracted");
-        } else {
-            tracing::info!("slot empty");
         }
 
-        tracing::info!("done");
         v
     }
 
@@ -83,14 +68,7 @@ impl<T> VecOpt<T> {
     }
 
     pub fn take(&mut self, index: usize) -> Option<T> {
-        self.ensure_index(index);
-        let item = replace(&mut self.vec[index], None);
-
-        if item.is_some() {
-            self.len -= 1;
-        }
-
-        item
+        self.remove(index)
     }
 }
 
