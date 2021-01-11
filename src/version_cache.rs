@@ -1,7 +1,7 @@
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use std::{cell::Cell, ops::Deref, sync::Arc};
-use thread_local::CachedThreadLocal;
+use thread_local::ThreadLocal;
 use version_tag::{combine, VersionTag};
 
 pub struct VersionCache<T>(OnceCell<(RwLock<Option<CacheData<T>>>, ReentrencyCheck)>);
@@ -74,11 +74,11 @@ impl<T> Deref for CacheData<T> {
     }
 }
 
-struct ReentrencyCheck(CachedThreadLocal<Cell<bool>>);
+struct ReentrencyCheck(ThreadLocal<Cell<bool>>);
 
 impl ReentrencyCheck {
     fn new() -> Self {
-        Self(CachedThreadLocal::new())
+        Self(ThreadLocal::new())
     }
 
     fn check_and_panic(&self) {
