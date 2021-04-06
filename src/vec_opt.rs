@@ -58,15 +58,6 @@ impl<T> VecOpt<T> {
         v
     }
 
-    pub(crate) fn remove_or_clear(&mut self, idx: Option<usize>) {
-        match idx {
-            Some(idx) => {
-                self.remove(idx);
-            }
-            None => self.clear(),
-        }
-    }
-
     pub fn take(&mut self, index: usize) -> Option<T> {
         self.remove(index)
     }

@@ -1,10 +1,11 @@
+use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 use once_cell::sync::OnceCell;
 use parking_lot::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 #[doc(hidden)]
-pub struct EntityIdSet(OnceCell<Mutex<IndexSet<Uuid>>>);
+pub struct EntityIdSet(OnceCell<Mutex<IndexSet<Uuid, FxBuildHasher>>>);
 
 impl EntityIdSet {
     pub const fn new() -> Self {
@@ -15,8 +16,8 @@ impl EntityIdSet {
         self.get().len()
     }
 
-    fn get(&self) -> MutexGuard<IndexSet<Uuid>> {
-        self.0.get_or_init(|| Mutex::new(IndexSet::new())).lock()
+    fn get(&self) -> MutexGuard<IndexSet<Uuid, FxBuildHasher>> {
+        self.0.get_or_init(|| Default::default()).lock()
     }
 
     pub fn get_index(&self, uuid: &Uuid) -> Option<usize> {

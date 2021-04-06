@@ -10,11 +10,8 @@ proc-macro = true
 
 [dependencies]
 Inflector = "0.11"
-either = "1"
 proc-macro2 = "1"
 quote = "1"
-serde = "1"
 syn = "1"
-toml = "0.5"
 
 [dev-dependencies]
