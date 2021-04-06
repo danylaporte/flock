@@ -9,8 +9,6 @@ cache: cargo
 
 script:
   - cargo build
-  - cargo build --example basic
-  - cargo build --example multi_key
 
 before_deploy:
   - cargo doc --no-deps --all-features
