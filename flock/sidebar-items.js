@@ -1,0 +1,1 @@
+initSidebarItems({"derive":[["EntityId","Transform a tuple into an EntityId."]],"mod":[["iter",""],["many_to_many",""],["one_to_many",""],["vec_opt",""]],"struct":[["OnceCell","A thread-safe cell which can be written to only once."],["Uuid","A Universally Unique Identifier (UUID)."]],"trait":[["EntityBy",""],["SetTag",""],["TryEntityIdFromUuid",""]]});
