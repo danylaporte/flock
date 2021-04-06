@@ -71,14 +71,6 @@ pub fn generate(input: DeriveInput) -> TokenStream {
             }
         }
 
-        impl<'a> flock::mssql_client::FromColumn<'a> for #ident {
-            type Value = flock::Uuid;
-
-            fn from_column(id: flock::Uuid) -> flock::mssql_client::Result<Self> {
-                Ok(Self::from(id))
-            }
-        }
-
         impl std::hash::Hash for #ident {
             fn hash<H>(&self, state: &mut H)
             where
@@ -91,16 +83,6 @@ pub fn generate(input: DeriveInput) -> TokenStream {
         impl std::cmp::Ord for #ident {
             fn cmp(&self, rhs: &Self) -> std::cmp::Ordering {
                 self.0.cmp(&rhs.0)
-            }
-        }
-
-        impl<'a> flock::mssql_client::Params<'a> for #ident {
-            fn params(self, out: &mut std::vec::Vec<flock::mssql_client::Parameter<'a>>) {
-                flock::mssql_client::Params::params(self.uuid(), out);
-            }
-
-            fn params_null(out: &mut std::vec::Vec<flock::mssql_client::Parameter<'a>>) {
-                out.push(flock::mssql_client::Parameter::Uuid(None));
             }
         }
 
